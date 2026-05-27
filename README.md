@@ -2,6 +2,7 @@
 
 ![cover](./tools/cover.png)
 
+Установка и запуск Semaphore. GUI для управления Ansible инфраструктурой.
 ---
 
 - [Установка Semaphore](./tools/install.md)
