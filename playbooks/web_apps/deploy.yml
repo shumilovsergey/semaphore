@@ -60,14 +60,13 @@
             timeout: 3
           when: not service_file.stat.exists
 
-        # ── First run ─────────────────────────────────────────────────────────
+        # ── Ensure app directory exists ───────────────────────────────────────
 
         - name: Create app directory
           file:
             path: "{{ app_path }}"
             state: directory
             mode: "0755"
-          when: not service_file.stat.exists
 
         # ── Update: backups ───────────────────────────────────────────────────
 
