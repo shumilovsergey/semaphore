@@ -1,0 +1,175 @@
+---
+# Required Semaphore extra variables:
+#
+# app_name: "myapp" (user input)
+
+
+# "web_apps": {
+#   "xxx": {
+#     "PORT": "xxx",
+#     "AUTH_URL": "https://auth-center.sh-development.ru",
+#     "AUTH_INTERNAL": "https://auth-center.sh-development.ru",
+#     "APP_URL": "https://xxx.sh-development.ru",
+#     "APP_TOKEN": "xxx",
+#     "SECRET_KEY": "xxx",
+#     "BIN_URL": "xxxx",
+#     "HOST": "xxx.xxx.xxx.xxx"
+#   },
+#   {
+#     ...
+#   }
+# }
+
+
+
+
+- name: Deploy web app
+  hosts: all
+  gather_facts: true
+  vars:
+    app_config: "{{ web_apps[app_name] }}"
+    app_path: "/opt/{{ app_name }}"
+    bin_path: "/opt/{{ app_name }}/{{ app_name }}"
+    db_path: "/opt/{{ app_name }}/{{ app_name }}.db"
+    service_file_path: "/etc/systemd/system/{{ app_name }}.service"
+    timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+  tasks:
+    - name: Run deploy tasks on target host
+      when: inventory_hostname == app_config.HOST
+      block:
+
+        # ── Guards ────────────────────────────────────────────────────────────
+
+        - name: Fail if PORT is not defined
+          fail:
+            msg: "app_config.PORT is not set for app '{{ app_name }}'"
+          when: app_config.PORT is not defined or app_config.PORT == ""
+
+        - name: Check if service already exists
+          stat:
+            path: "{{ service_file_path }}"
+          register: service_file
+
+        - name: Fail if port is already in use (first run only)
+          wait_for:
+            host: localhost
+            port: "{{ app_config.PORT }}"
+            state: stopped
+            timeout: 3
+          when: not service_file.stat.exists
+
+        # ── First run ─────────────────────────────────────────────────────────
+
+        - name: Create app directory
+          file:
+            path: "{{ app_path }}"
+            state: directory
+            mode: "0755"
+          when: not service_file.stat.exists
+
+        # ── Update: backups ───────────────────────────────────────────────────
+
+        - name: Backup existing binary
+          copy:
+            src: "{{ bin_path }}"
+            dest: "{{ app_path }}/{{ app_name }}.backup"
+            remote_src: yes
+          when: service_file.stat.exists
+
+        - name: Check if database file exists
+          stat:
+            path: "{{ db_path }}"
+          register: db_file
+          when: service_file.stat.exists
+
+        - name: Backup database
+          command: sqlite3 {{ db_path }} ".backup {{ db_path }}.backup"
+          when: service_file.stat.exists and db_file.stat.exists
+
+        # ── Download binary ───────────────────────────────────────────────────
+
+        - name: Download binary
+          get_url:
+            url: "{{ app_config.BIN_URL }}"
+            dest: "{{ bin_path }}"
+            mode: "0755"
+            force: yes
+
+        # ── First run: create and start service ───────────────────────────────
+
+        - name: Deploy systemd service file
+          template:
+            src: templates/system.service.j2
+            dest: "{{ service_file_path }}"
+          when: not service_file.stat.exists
+
+        - name: Reload systemd daemon
+          systemd:
+            daemon_reload: yes
+          when: not service_file.stat.exists
+
+        - name: Enable and start service (first run)
+          systemd:
+            name: "{{ app_name }}"
+            state: started
+            enabled: yes
+          when: not service_file.stat.exists
+
+        # ── Update: restart service ───────────────────────────────────────────
+
+        - name: Restart service (update)
+          systemd:
+            name: "{{ app_name }}"
+            state: restarted
+          when: service_file.stat.exists
+
+        # ── Health checks with rollback ───────────────────────────────────────
+
+        - name: Health check
+          block:
+            - name: Wait for app to come up
+              wait_for:
+                host: localhost
+                port: "{{ app_config.PORT }}"
+                state: started
+                timeout: 30
+
+            - name: Verify service is active
+              command: systemctl is-active {{ app_name }}
+              changed_when: false
+
+            - name: HTTP health check
+              uri:
+                url: "http://localhost:{{ app_config.PORT }}"
+                status_code: 200
+              retries: 5
+              delay: 3
+
+          rescue:
+            - name: Rollback - restore binary from backup
+              copy:
+                src: "{{ app_path }}/{{ app_name }}.backup"
+                dest: "{{ bin_path }}"
+                remote_src: yes
+              when: service_file.stat.exists
+
+            - name: Rollback - restart service with previous binary
+              systemd:
+                name: "{{ app_name }}"
+                state: restarted
+              when: service_file.stat.exists
+
+            - name: Rollback - verify old version is up
+              uri:
+                url: "http://localhost:{{ app_config.PORT }}"
+                status_code: 200
+              retries: 5
+              delay: 3
+              when: service_file.stat.exists
+
+            - name: Rollback - report result
+              fail:
+                msg: >
+                  New version of '{{ app_name }}' failed health check.
+                  Previous binary has been restored and the service restarted.
