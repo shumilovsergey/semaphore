@@ -26,6 +26,7 @@
 - name: Deploy web app
   hosts: all
   gather_facts: true
+  ignore_unreachable: true
   vars:
     app_config: "{{ web_apps[app_name] }}"
     app_path: "/opt/{{ app_name }}"
@@ -36,7 +37,7 @@
 
   tasks:
     - name: Run deploy tasks on target host
-      when: inventory_hostname == app_config.HOST
+      when: ansible_host == app_config.HOST
       block:
 
         # ── Guards ────────────────────────────────────────────────────────────
