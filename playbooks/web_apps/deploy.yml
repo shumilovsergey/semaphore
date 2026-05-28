@@ -27,6 +27,7 @@
   hosts: all
   gather_facts: true
   ignore_unreachable: true
+  become: true
   vars:
     app_config: "{{ web_apps[app_name] }}"
     app_path: "/opt/{{ app_name }}"
