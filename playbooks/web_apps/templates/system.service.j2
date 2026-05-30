@@ -7,13 +7,9 @@ Type=simple
 User=root
 WorkingDirectory={{ app_path }}
 
-Environment=PORT={{ app_config.PORT }}
-Environment=DB_PATH={{ db_path }}
-Environment=AUTH_URL={{ app_config.AUTH_URL }}
-Environment=AUTH_INTERNAL={{ app_config.AUTH_INTERNAL }}
-Environment=APP_URL={{ app_config.APP_URL }}
-Environment=APP_TOKEN={{ app_config.APP_TOKEN }}
-Environment=SECRET_KEY={{ app_config.SECRET_KEY }}
+{% for key, value in app_config.env.items() %}
+Environment={{ key }}={{ value }}
+{% endfor %}
 
 ExecStart={{ app_path }}/{{ app_name }}
 
