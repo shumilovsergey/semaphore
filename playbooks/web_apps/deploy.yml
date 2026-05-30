@@ -4,19 +4,31 @@
 # app_name: "myapp" (user input)
 
 
-# "web_apps": {
-#   "xxx": {
-#     "PORT": "xxx",
-#     "AUTH_URL": "https://auth-center.sh-development.ru",
-#     "AUTH_INTERNAL": "https://auth-center.sh-development.ru",
-#     "APP_URL": "https://xxx.sh-development.ru",
-#     "APP_TOKEN": "xxx",
-#     "SECRET_KEY": "xxx",
-#     "BIN_URL": "xxxx",
-#     "HOST": "xxx.xxx.xxx.xxx"
-#   },
-#   {
-#     ...
+# {
+#   "web_apps": {
+    
+#     "myapp1": {
+#       "HOST": "xxx.xxx.xxx.xxx",
+#       "BIN_URL": "https://xxxx",
+#       "env": {
+#         "PORT": "xxxx",
+#         "AUTH_URL": "https://auth-center.sh-development.ru",
+#         "AUTH_INTERNAL": "https://auth-center.sh-development.ru",
+#         "APP_URL": "https://xxx.sh-development.ru",
+#         "APP_TOKEN": "xxx",
+#         "SECRET_KEY": "xxx"}},
+    
+#     "myapp2": {
+#       "HOST": "xxx.xxx.xxx.xxx",
+#       "BIN_URL": "https://xxxx",
+#       "env": {
+#         "PORT": "xxxx",
+#         "AUTH_URL": "https://auth-center.sh-development.ru",
+#         "AUTH_INTERNAL": "https://auth-center.sh-development.ru",
+#         "APP_URL": "https://xxx.sh-development.ru",
+#         "APP_TOKEN": "xxx",
+#         "SECRET_KEY": "xxx"}}
+
 #   }
 # }
 
@@ -45,8 +57,8 @@
 
         - name: Fail if PORT is not defined
           fail:
-            msg: "app_config.PORT is not set for app '{{ app_name }}'"
-          when: app_config.PORT is not defined or app_config.PORT == ""
+            msg: "app_config.env.PORT is not set for app '{{ app_name }}'"
+          when: app_config.env.PORT is not defined or app_config.env.PORT == ""
 
         - name: Check if service already exists
           stat:
@@ -56,7 +68,7 @@
         - name: Fail if port is already in use (first run only)
           wait_for:
             host: localhost
-            port: "{{ app_config.PORT }}"
+            port: "{{ app_config.env.PORT }}"
             state: stopped
             timeout: 3
           when: not service_file.stat.exists
@@ -132,7 +144,7 @@
             - name: Wait for app to come up
               wait_for:
                 host: localhost
-                port: "{{ app_config.PORT }}"
+                port: "{{ app_config.env.PORT }}"
                 state: started
                 timeout: 30
 
@@ -142,7 +154,7 @@
 
             - name: HTTP health check
               uri:
-                url: "http://localhost:{{ app_config.PORT }}"
+                url: "http://localhost:{{ app_config.env.PORT }}"
                 status_code: 200
               retries: 5
               delay: 3
@@ -163,7 +175,7 @@
 
             - name: Rollback - verify old version is up
               uri:
-                url: "http://localhost:{{ app_config.PORT }}"
+                url: "http://localhost:{{ app_config.env.PORT }}"
                 status_code: 200
               retries: 5
               delay: 3
