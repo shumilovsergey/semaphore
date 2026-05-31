@@ -31,6 +31,7 @@
 
 # ----- ИДЕИ НА БУДУЩЕЕ
 
+# Health check сейчас 15s timeout - возможно в будущем нужно вынести параметр в ENV. Но сейчас все ок - приложения простые
 # перейти с root пользователя на srv user
 # контролить конфиг - пул из гита / хранить в папке с бинарником / добавить путь в переменную
 
@@ -148,18 +149,21 @@
                 host: localhost
                 port: "{{ app_config.env.PORT }}"
                 state: started
-                timeout: 30
+                timeout: 15
 
             - name: Verify service is active
               command: systemctl is-active {{ app_name }}
               changed_when: false
 
+
             - name: HTTP health check
               uri:
                 url: "http://localhost:{{ app_config.env.PORT }}"
                 status_code: 200
-              retries: 2
-              delay: 2
+              register: health
+              until: health.status == 200
+              retries: 3
+              delay: 1
 
           rescue:
             - name: Rollback - restore binary from backup
