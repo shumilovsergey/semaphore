@@ -1,8 +1,4 @@
----
-# Required Semaphore extra variables:
-#
-# app_name: "myapp" (user input)
-
+# ----- ШАБЛОН Semaphore extra ENV JSON (app_name имя выибирается пользователем при запуске плейбука)
 
 # {
 #   "web_apps": {
@@ -33,6 +29,12 @@
 # }
 
 
+# ----- ИДЕИ НА БУДУЩЕЕ
+
+# перейти с root пользователя на srv user
+# контролить конфиг - пул из гита / хранить в папке с бинарником / добавить путь в переменную
+
+# ---------------------
 
 
 - name: Deploy web app
@@ -156,8 +158,8 @@
               uri:
                 url: "http://localhost:{{ app_config.env.PORT }}"
                 status_code: 200
-              retries: 5
-              delay: 3
+              retries: 2
+              delay: 2
 
           rescue:
             - name: Rollback - restore binary from backup
