@@ -1,0 +1,45 @@
+---
+
+# Дома новы, но предрассудки стары.
+# Порадуйтесь, не истребят
+# Ни годы их, ни моды, ни пожары.
+
+
+# ----- ШАБЛОН Semaphore extra ENV JSON
+
+# github_clone_targets
+#
+# {
+#   "github_clone_targets": [
+#     "git@github.com:you/repo1.git",
+#     "git@github.com:you/repo2.git"
+#   ]
+# }
+
+
+- name: Mirror GitHub repositories
+  hosts: home-lab
+  become: false
+
+  vars:
+    backup_dir: /backup/github-cloner
+
+  tasks:
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Mirror or update each repository
+      ansible.builtin.shell: |
+        REPO_NAME=$(basename "{{ item }}" .git)
+        TARGET="{{ backup_dir }}/${REPO_NAME}.git"
+        if [ -d "$TARGET" ]; then
+          git -C "$TARGET" remote update --prune
+        else
+          git clone --mirror "{{ item }}" "$TARGET"
+        fi
+      loop: "{{ github_clone_targets }}"
+      register: clone_results
+      changed_when: "'new branch' in clone_results.stdout or 'new tag' in clone_results.stdout or clone_results.rc == 0"
