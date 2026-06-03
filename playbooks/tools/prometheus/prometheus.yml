@@ -1,0 +1,125 @@
+---
+
+- name: Deploy Prometheus
+  hosts: home-lab
+  gather_facts: true
+  ignore_unreachable: true
+  become: true
+  vars:
+    prom_path: "/opt/prometheus"
+    bin_path: "/opt/prometheus/prometheus"
+    config_path: "/etc/prometheus/prometheus.yml"
+    data_path: "/var/lib/prometheus"
+    service_file_path: "/etc/systemd/system/prometheus.service"
+    port: "9090"
+
+  tasks:
+    - name: Run deploy tasks on target host
+      when: ansible_host == prom.HOST
+      block:
+
+        # ── Ensure directories exist ──────────────────────────────────────────
+
+        - name: Create prometheus directories
+          file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop:
+            - "{{ prom_path }}"
+            - /etc/prometheus
+            - /etc/prometheus/rules
+            - "{{ data_path }}"
+
+        # ── Check current state ───────────────────────────────────────────────
+
+        - name: Check if service already exists
+          stat:
+            path: "{{ service_file_path }}"
+          register: service_file
+
+        - name: Fail if port is already in use (first run only)
+          wait_for:
+            host: localhost
+            port: "{{ port }}"
+            state: stopped
+            timeout: 3
+          when: not service_file.stat.exists
+
+        # ── Copy binary ───────────────────────────────────────────────────────
+
+        - name: Copy prometheus binary
+          copy:
+            src: prometheus
+            dest: "{{ bin_path }}"
+            mode: "0755"
+          register: binary_changed
+
+        # ── Deploy config ─────────────────────────────────────────────────────
+
+        - name: Deploy prometheus config
+          copy:
+            src: files/prometheus.config.yml
+            dest: "{{ config_path }}"
+            mode: "0644"
+          register: config_changed
+
+        - name: Deploy rules files
+          copy:
+            src: files/{{ item }}
+            dest: /etc/prometheus/rules/{{ item }}
+            mode: "0644"
+          loop:
+            - disk.yml
+          register: rules_changed
+
+        # ── First run: create and start service ───────────────────────────────
+
+        - name: Deploy systemd service file
+          copy:
+            src: files/prometheus.service
+            dest: "{{ service_file_path }}"
+          when: not service_file.stat.exists
+
+        - name: Reload systemd daemon
+          systemd:
+            daemon_reload: yes
+          when: not service_file.stat.exists
+
+        - name: Enable and start service (first run)
+          systemd:
+            name: prometheus
+            state: started
+            enabled: yes
+          when: not service_file.stat.exists
+
+        # ── Update ────────────────────────────────────────────────────────────
+
+        - name: Restart service (binary updated)
+          systemd:
+            name: prometheus
+            state: restarted
+          when: service_file.stat.exists and binary_changed.changed
+
+        - name: Hot-reload config (config only, no restart needed)
+          uri:
+            url: "http://localhost:{{ port }}/-/reload"
+            method: POST
+            status_code: 200
+          when: service_file.stat.exists and not binary_changed.changed and (config_changed.changed or rules_changed.changed)
+
+        # ── Health check ──────────────────────────────────────────────────────
+
+        - name: Wait for prometheus to come up
+          wait_for:
+            host: localhost
+            port: "{{ port }}"
+            state: started
+            timeout: 15
+
+        - name: Health check
+          uri:
+            url: "http://localhost:{{ port }}/-/healthy"
+            status_code: 200
+          retries: 3
+          delay: 2
