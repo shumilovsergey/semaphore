@@ -7,9 +7,10 @@
   become: true
   vars:
     prom_path: "/opt/prometheus"
-    bin_path: "/opt/prometheus/prometheus"
-    config_path: "/etc/prometheus/prometheus.yml"
-    data_path: "/var/lib/prometheus"
+    bin_path: "{{ prom_path }}/prometheus"
+    config_path: "{{ prom_path }}/prometheus.yml"
+    data_path: "{{ prom_path }}/data"
+    rules_path: "{{ prom_path }}/rules"
     service_file_path: "/etc/systemd/system/prometheus.service"
     port: "9090"
 
@@ -27,9 +28,8 @@
             mode: "0755"
           loop:
             - "{{ prom_path }}"
-            - /etc/prometheus
-            - /etc/prometheus/rules
             - "{{ data_path }}"
+            - "{{ rules_path }}"
 
         # ── Check current state ───────────────────────────────────────────────
 
@@ -68,7 +68,7 @@
         - name: Deploy rules files
           copy:
             src: files/{{ item }}
-            dest: /etc/prometheus/rules/{{ item }}
+            dest: "{{ rules_path }}/{{ item }}"
             mode: "0644"
           loop:
             - disk.yml

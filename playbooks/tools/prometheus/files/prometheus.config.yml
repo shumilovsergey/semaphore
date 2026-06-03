@@ -2,7 +2,7 @@ global:
   scrape_interval: 60s
 
 rule_files:
-  - "/etc/prometheus/rules/disk.yml"
+  - "/opt/prometheus/rules/disk.yml"
 
 
 scrape_configs:
