@@ -46,13 +46,14 @@
             timeout: 3
           when: not service_file.stat.exists
 
-        # ── Copy binary ───────────────────────────────────────────────────────
+        # ── Download binary ───────────────────────────────────────────────────
 
-        - name: Copy prometheus binary
-          copy:
-            src: prometheus
+        - name: Download prometheus binary
+          get_url:
+            url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
             dest: "{{ bin_path }}"
             mode: "0755"
+            force: yes
           register: binary_changed
 
         # ── Deploy config ─────────────────────────────────────────────────────
