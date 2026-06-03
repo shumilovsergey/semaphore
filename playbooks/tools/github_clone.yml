@@ -18,8 +18,8 @@
 
 
 - name: Mirror GitHub repositories
-  hosts: intel-macmini
-  become: false
+  hosts: home-lab
+  become: true
 
   vars:
     backup_dir: /backup/github-cloner
