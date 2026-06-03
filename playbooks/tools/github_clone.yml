@@ -18,7 +18,7 @@
 
 
 - name: Mirror GitHub repositories
-  hosts: home-lab
+  hosts: intel-macmini
   become: false
 
   vars:
