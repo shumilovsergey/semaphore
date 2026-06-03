@@ -15,8 +15,6 @@
     port: "9090"
 
   tasks:
-    - name: Run deploy tasks on target host
-
     # ── Ensure directories exist ──────────────────────────────────────────
 
     - name: Create prometheus directories
