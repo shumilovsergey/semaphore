@@ -1,3 +1,5 @@
+---
+
 global:
   scrape_interval: 60s
 
@@ -42,31 +44,6 @@ scrape_configs:
         labels:
           server: 'home-lab'
 
-  # Windows Exporter
-  - job_name: 'windows_exporter'
-    scrape_timeout: 10s
-    metrics_path: /metrics
-    relabel_configs:
-      - source_labels: [server]
-        target_label: instance
-        action: replace
-    static_configs:
-      - targets: ['10.10.30.147:9182']
-        labels:
-          server: 'vm-win-10'
-
-  # MySQL Exporter
-  - job_name: 'mysql_exporter'
-    metrics_path: /metrics
-    relabel_configs:
-      - source_labels: [server]
-        target_label: instance
-        action: replace
-    static_configs:
-      - targets: ['10.10.30.165:9104']
-        labels:
-          server: 'home-lab'
-
   # Blackbox Exporter
   - job_name: 'blackbox'
     metrics_path: /probe
@@ -75,11 +52,12 @@ scrape_configs:
     static_configs:
       - targets:
           - https://sh-development.ru
-          - https://zhenshen.sh-development.ru
           - https://wgetbash.sh-development.ru
-          - https://arena-back.sh-development.ru
           - https://auth-center.sh-development.ru
           - https://auth.sh-development.ru
+          - https://blur.sh-development.ru
+          - https://food-scaner.sh-development.ru/
+
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -87,18 +65,6 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: localhost:9115
-
-  # Docker
-  - job_name: 'docker'
-    metrics_path: /metrics
-    relabel_configs:
-      - source_labels: [server]
-        target_label: instance
-        action: replace
-    static_configs:
-      - targets: ['45.131.41.34:9323']
-        labels:
-          server: 'ru-vps'
 
   # cAdvisor
   - job_name: 'cadvisor'

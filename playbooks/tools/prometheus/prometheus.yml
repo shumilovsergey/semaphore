@@ -6,16 +6,25 @@
   ignore_unreachable: true
   become: true
   vars:
+    # ВАЖНО! 
+    # Если менять переменные, то нужно проверить конфиг и службу
+    # Есе захардкожено потому что в шаблонах нет yml highlite! Это моя вкусовщина!
+    #
+    # hardcoded -----
+    prom_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
     prom_path: "/opt/prometheus"
+    port: "9090"
+    service_file_path: "/etc/systemd/system/prometheus.service"
+
+    # softcoded ------
     bin_path: "{{ prom_path }}/prometheus"
     config_path: "{{ prom_path }}/prometheus.yml"
     data_path: "{{ prom_path }}/data"
     rules_path: "{{ prom_path }}/rules"
-    service_file_path: "/etc/systemd/system/prometheus.service"
-    port: "9090"
-
+    
+    
   tasks:
-    # ── Ensure directories exist ──────────────────────────────────────────
+    # ── Создание директорий ──────────────────────────────────────────────
 
     - name: Create prometheus directories
       file:
@@ -27,7 +36,7 @@
         - "{{ data_path }}"
         - "{{ rules_path }}"
 
-    # ── Check current state ───────────────────────────────────────────────
+    # ── Проверка текущего состояния ──────────────────────────────────────
 
     - name: Check if service already exists
       stat:
@@ -42,17 +51,17 @@
         timeout: 3
       when: not service_file.stat.exists
 
-    # ── Download binary ───────────────────────────────────────────────────
+    # ── Загрузка бинарника ───────────────────────────────────────────────
 
     - name: Download prometheus binary
       get_url:
-        url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
+        url: "{{ prom_url }}"
         dest: "{{ bin_path }}"
         mode: "0755"
         force: yes
       register: binary_changed
 
-    # ── Deploy config ─────────────────────────────────────────────────────
+    # ── Деплой конфига ───────────────────────────────────────────────────
 
     - name: Deploy prometheus config
       copy:
@@ -70,7 +79,7 @@
         - disk.yml
       register: rules_changed
 
-    # ── First run: create and start service ───────────────────────────────
+    # ── Первый запуск: создание и старт сервиса ──────────────────────────
 
     - name: Deploy systemd service file
       copy:
@@ -90,7 +99,7 @@
         enabled: yes
       when: not service_file.stat.exists
 
-    # ── Update ────────────────────────────────────────────────────────────
+    # ── Обновление ───────────────────────────────────────────────────────
 
     - name: Restart service (binary updated)
       systemd:
@@ -105,7 +114,7 @@
         status_code: 200
       when: service_file.stat.exists and not binary_changed.changed and (config_changed.changed or rules_changed.changed)
 
-    # ── Health check ──────────────────────────────────────────────────────
+    # ── Проверка работоспособности ───────────────────────────────────────
 
     - name: Wait for prometheus to come up
       wait_for:

@@ -1,3 +1,5 @@
+---
+
 groups:
   - name: disk
     interval: 1m
