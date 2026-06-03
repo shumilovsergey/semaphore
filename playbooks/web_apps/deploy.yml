@@ -57,7 +57,7 @@
       when: ansible_host == app_config.HOST
       block:
 
-        # ── Guards ────────────────────────────────────────────────────────────
+        # ── Проверки ──────────────────────────────────────────────────────────
 
         - name: Fail if PORT is not defined
           fail:
@@ -77,7 +77,7 @@
             timeout: 3
           when: not service_file.stat.exists
 
-        # ── Ensure app directory exists ───────────────────────────────────────
+        # ── Создание директории приложения ───────────────────────────────────
 
         - name: Create app directory
           file:
@@ -85,7 +85,7 @@
             state: directory
             mode: "0755"
 
-        # ── Update: backups ───────────────────────────────────────────────────
+        # ── Обновление: бэкапы ───────────────────────────────────────────────
 
         - name: Backup existing binary
           copy:
@@ -104,7 +104,7 @@
           command: sqlite3 {{ db_path }} ".backup {{ db_path }}.backup"
           when: service_file.stat.exists and db_file.stat.exists
 
-        # ── Download binary ───────────────────────────────────────────────────
+        # ── Загрузка бинарника ───────────────────────────────────────────────
 
         - name: Download binary
           get_url:
@@ -113,7 +113,7 @@
             mode: "0755"
             force: yes
 
-        # ── First run: create and start service ───────────────────────────────
+        # ── Первый запуск: создание и старт сервиса ──────────────────────────
 
         - name: Deploy systemd service file
           template:
@@ -133,7 +133,7 @@
             enabled: yes
           when: not service_file.stat.exists
 
-        # ── Update: restart service ───────────────────────────────────────────
+        # ── Обновление: перезапуск сервиса ───────────────────────────────────
 
         - name: Restart service (update)
           systemd:
@@ -141,7 +141,7 @@
             state: restarted
           when: service_file.stat.exists
 
-        # ── Health checks with rollback ───────────────────────────────────────
+        # ── Проверка работоспособности с откатом ─────────────────────────────
 
         - name: Health check
           block:
