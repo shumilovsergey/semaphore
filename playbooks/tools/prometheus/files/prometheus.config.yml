@@ -1,0 +1,113 @@
+global:
+  scrape_interval: 60s
+
+rule_files:
+  - "/etc/prometheus/rules/disk.yml"
+
+
+scrape_configs:
+  # Node Exporter
+  - job_name: 'node_exporter'
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+        action: replace
+    static_configs:
+      - targets: ['45.131.41.34:9100']
+        labels:
+          server: 'ru-vps'
+      - targets: ['5.189.254.175:9100']
+        labels:
+          server: 'la-vps'
+      - targets: ['10.10.30.165:9100']
+        labels:
+          server: 'home-lab'
+
+  # Process Exporter
+  - job_name: 'process_exporter'
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+        action: replace
+    static_configs:
+      - targets: ['45.131.41.34:9256']
+        labels:
+          server: 'ru-vps'
+      - targets: ['5.189.254.175:9256']
+        labels:
+          server: 'la-vps'
+      - targets: ['10.10.30.165:9256']
+        labels:
+          server: 'home-lab'
+
+  # Windows Exporter
+  - job_name: 'windows_exporter'
+    scrape_timeout: 10s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+        action: replace
+    static_configs:
+      - targets: ['10.10.30.147:9182']
+        labels:
+          server: 'vm-win-10'
+
+  # MySQL Exporter
+  - job_name: 'mysql_exporter'
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+        action: replace
+    static_configs:
+      - targets: ['10.10.30.165:9104']
+        labels:
+          server: 'home-lab'
+
+  # Blackbox Exporter
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://sh-development.ru
+          - https://zhenshen.sh-development.ru
+          - https://wgetbash.sh-development.ru
+          - https://arena-back.sh-development.ru
+          - https://auth-center.sh-development.ru
+          - https://auth.sh-development.ru
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:9115
+
+  # Docker
+  - job_name: 'docker'
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+        action: replace
+    static_configs:
+      - targets: ['45.131.41.34:9323']
+        labels:
+          server: 'ru-vps'
+
+  # cAdvisor
+  - job_name: 'cadvisor'
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [server]
+        target_label: instance
+        action: replace
+    static_configs:
+      - targets: ['10.10.30.165:9324']
+        labels:
+          server: 'home-lab'

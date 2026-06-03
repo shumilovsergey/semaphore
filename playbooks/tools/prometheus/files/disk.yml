@@ -1,0 +1,77 @@
+groups:
+  - name: disk
+    interval: 1m
+    rules:
+
+      # --- Recording rules (clean up the long OR queries) ---
+
+      - record: disk:free_percent:non_root
+        expr: |
+          (
+            100 * node_filesystem_avail_bytes{
+              mountpoint!="/",
+              mountpoint!~"/boot.*|/snap.*",
+              fstype!~"tmpfs|fuse.*|squashfs|iso9660"
+            }
+            / node_filesystem_size_bytes{
+              mountpoint!="/",
+              mountpoint!~"/boot.*|/snap.*",
+              fstype!~"tmpfs|fuse.*|squashfs|iso9660"
+            }
+          )
+          or
+          (
+            100 * wmi_logical_disk_free_bytes{volume!="C:"}
+                / wmi_logical_disk_size_bytes{volume!="C:"}
+          )
+          or
+          (
+            100 * windows_logical_disk_free_bytes{volume!="C:"}
+                / windows_logical_disk_size_bytes{volume!="C:"}
+          )
+
+      - record: disk:free_gib:non_root
+        expr: |
+          (
+            node_filesystem_avail_bytes{
+              mountpoint!="/",
+              mountpoint!~"/boot.*|/snap.*",
+              fstype!~"tmpfs|fuse.*|squashfs|iso9660"
+            }
+            or wmi_logical_disk_free_bytes{volume!="C:"}
+            or windows_logical_disk_free_bytes{volume!="C:"}
+          )
+          / (1024 * 1024 * 1024)
+
+
+      # --- Sub-alerts (write to ALERTS{} metric, no notification sent) ---
+
+      - alert: DiskFreePercentLow
+        expr: |
+          (disk:free_percent:non_root < 5)
+          or
+          (
+            disk:free_percent:non_root < 10
+            and ignoring(alertname, alertstate, notify)
+            ALERTS{alertname="DiskFreePercentLow", alertstate="firing"}
+          )
+        for: 5m
+        labels:
+          notify: "false"
+        annotations:
+          summary: "Data disk free percent low on {{ $labels.instance }}"
+
+      - alert: DiskFreeGibLow
+        expr: |
+          (disk:free_gib:non_root < 10)
+          or
+          (
+            disk:free_gib:non_root < 20
+            and ignoring(alertname, alertstate, notify)
+            ALERTS{alertname="DiskFreeGibLow", alertstate="firing"}
+          )
+        for: 5m
+        labels:
+          notify: "false"
+        annotations:
+          summary: "Data disk free space low on {{ $labels.instance }}"

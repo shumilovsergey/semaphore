@@ -1,0 +1,16 @@
+[Unit]
+Description=Prometheus
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/prometheus/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus \
+  --web.listen-address=:9090 \
+  --web.enable-lifecycle
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
