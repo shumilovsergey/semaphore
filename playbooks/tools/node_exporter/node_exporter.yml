@@ -1,0 +1,104 @@
+---
+
+- name: Deploy Node Exporter
+  hosts: "{{ target_host }}"
+  gather_facts: true
+  ignore_unreachable: true
+  become: true
+  vars:
+    # ВАЖНО!
+    # target_host  — передаётся как extra var (обязательно, без дефолта)
+    #
+    # hardcoded -----
+    node_exporter_url: ""
+    node_exporter_path: "/opt/node_exporter"
+    port: "9100"
+    service_file_path: "/etc/systemd/system/node_exporter.service"
+
+    # softcoded ------
+    bin_path: "{{ node_exporter_path }}/node_exporter"
+
+  tasks:
+    # ── Проверка обязательных переменных ────────────────────────────────
+
+    - name: Fail if target_host is not set
+      fail:
+        msg: "target_host extra var is required"
+      when: target_host is not defined or target_host == ""
+
+    # ── Создание директории ──────────────────────────────────────────────
+
+    - name: Create node_exporter directory
+      file:
+        path: "{{ node_exporter_path }}"
+        state: directory
+        mode: "0755"
+
+    # ── Проверка текущего состояния ──────────────────────────────────────
+
+    - name: Check if service already exists
+      stat:
+        path: "{{ service_file_path }}"
+      register: service_file
+
+    - name: Fail if port is already in use (first run only)
+      wait_for:
+        host: localhost
+        port: "{{ port }}"
+        state: stopped
+        timeout: 3
+      when: not service_file.stat.exists
+
+    # ── Загрузка бинарника ───────────────────────────────────────────────
+
+    - name: Download node_exporter binary
+      get_url:
+        url: "{{ node_exporter_url }}"
+        dest: "{{ bin_path }}"
+        mode: "0755"
+        force: yes
+      register: binary_changed
+
+    # ── Первый запуск: создание и старт сервиса ──────────────────────────
+
+    - name: Deploy systemd service file
+      copy:
+        src: files/node_exporter.service
+        dest: "{{ service_file_path }}"
+      when: not service_file.stat.exists
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+      when: not service_file.stat.exists
+
+    - name: Enable and start service (first run)
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+      when: not service_file.stat.exists
+
+    # ── Обновление ───────────────────────────────────────────────────────
+
+    - name: Restart service (binary updated)
+      systemd:
+        name: node_exporter
+        state: restarted
+      when: service_file.stat.exists and binary_changed.changed
+
+    # ── Проверка работоспособности ───────────────────────────────────────
+
+    - name: Wait for node_exporter to come up
+      wait_for:
+        host: localhost
+        port: "{{ port }}"
+        state: started
+        timeout: 15
+
+    - name: Health check
+      uri:
+        url: "http://localhost:{{ port }}/metrics"
+        status_code: 200
+      retries: 3
+      delay: 2

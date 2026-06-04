@@ -1,0 +1,29 @@
+---
+
+# Управление DNS через NetworkManager (nmcli)
+# Применяется на: CentOS, RED OS
+
+# Берём первое активное соединение — обычно это основной интерфейс
+- name: Получить список активных соединений
+  command: nmcli -t -f NAME,DEVICE,STATE con show --active
+  register: nm_connections
+  changed_when: false
+
+- name: Определить имя основного соединения
+  set_fact:
+    nm_connection: "{{ nm_connections.stdout_lines[0].split(':')[0] }}"
+  when: nm_connections.stdout_lines | length > 0
+
+# ignore-auto-dns — чтобы DHCP не перезаписывал наши DNS
+- name: Установить DNS через nmcli
+  command: >
+    nmcli con mod "{{ nm_connection }}"
+    ipv4.dns "{{ dns_servers | join(',') }}"
+    ipv4.ignore-auto-dns yes
+  notify: restart NetworkManager
+
+- name: Перезапустить NetworkManager
+  systemd:
+    name: NetworkManager
+    state: restarted
+  listen: restart NetworkManager

@@ -1,0 +1,40 @@
+---
+
+# Определяет какой менеджер DNS используется на хосте
+# и записывает результат в переменную dns_backend
+
+- name: Проверить systemd-resolved
+  command: systemctl is-active systemd-resolved
+  register: resolved_status
+  changed_when: false
+  failed_when: false
+
+- name: Проверить наличие resolvconf
+  stat:
+    path: /usr/sbin/resolvconf
+  register: resolvconf_bin
+
+- name: Проверить NetworkManager
+  command: systemctl is-active NetworkManager
+  register: nm_status
+  changed_when: false
+  failed_when: false
+
+# Приоритет определения:
+# 1. systemd-resolved активен
+# 2. resolvconf установлен
+# 3. NetworkManager активен
+# 4. fallback — пишем /etc/resolv.conf напрямую
+- name: Установить переменную dns_backend
+  set_fact:
+    dns_backend: >-
+      {{
+        'systemd_resolved' if resolved_status.stdout == 'active' else
+        'resolvconf'       if resolvconf_bin.stat.exists else
+        'networkmanager'   if nm_status.stdout == 'active' else
+        'direct'
+      }}
+
+- name: Показать определённый бэкенд
+  debug:
+    msg: "Определён DNS бэкенд: {{ dns_backend }}"
