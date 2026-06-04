@@ -1,0 +1,37 @@
+---
+
+- name: Configure DNS
+  hosts: "{{ target_host }}"
+  gather_facts: true
+  ignore_unreachable: true
+  become: true
+  vars:
+    # ВАЖНО!
+    # target_host — передаётся как extra var (обязательно, без дефолта)
+    #
+    # hardcoded -----
+    dns_servers:
+      - ""   # основной DNS
+      - ""   # резервный DNS
+    dns_fallback:
+      - "1.1.1.1"
+      - "8.8.8.8"
+    dns_search: ""   # поисковый домен (необязательно)
+
+  tasks:
+    # ── Проверка обязательных переменных ────────────────────────────────
+
+    - name: Fail if target_host is not set
+      fail:
+        msg: "target_host extra var is required"
+      when: target_host is not defined or target_host == ""
+
+    # ── Определение бэкенда DNS ──────────────────────────────────────────
+
+    - name: Detect DNS backend
+      include_tasks: tasks/detect.yml
+
+    # ── Применение конфигурации под нужный бэкенд ────────────────────────
+
+    - name: Apply DNS config
+      include_tasks: tasks/{{ dns_backend }}.yml
