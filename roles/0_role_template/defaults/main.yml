@@ -1,3 +1,5 @@
 package_name: "your-package"
 service_name: "your-service"
 config_dest: "/etc/your-service/config.conf"
+
+# script changes test qq
