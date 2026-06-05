@@ -42,3 +42,5 @@ handlers/main.yml              │
   - name: Reload nginx      ←─┘
 ```
 
+Полный список переменных каждой роли — в её `defaults/main.yml`.
+

@@ -1,0 +1,10 @@
+# В Proxmox VM могут пересоздаваться с новым IP — inventory молча устаревает.
+# Без проверки плейбук выполнится на чужой машине.
+# Чтобы этого недопустить:
+- name: VM hostname matches inventory
+  assert:
+    that: ansible_hostname == inventory_hostname
+    fail_msg: >
+      Hostname mismatch — VM reports '{{ ansible_hostname }}' but inventory expects '{{ inventory_hostname }}'.
+      Update the inventory and try again.
+    success_msg: "Hostname check passed: {{ ansible_hostname }}"
