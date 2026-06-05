@@ -6,6 +6,8 @@
   ignore_unreachable: true
   become: true
 
+  vars:
+
   roles:
-    # - node_exporter
+    - preflight
     - prometheus
