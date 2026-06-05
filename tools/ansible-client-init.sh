@@ -26,7 +26,9 @@ fi
 
 SSH_KEY="$1"
 
-if [ -z "$SSH_KEY" ]; then
+if [ -z "$SSH_KEY" ] || [ "$SSH_KEY" = "PUT_HERE_PUBKEY" ]; then
+    echo "❌ SSH ключ не передан или не заменён."
+    echo
     echo "Использование:"
     echo "  curl -fsSL <url> | sudo bash -s \"<ssh public key>\""
     echo

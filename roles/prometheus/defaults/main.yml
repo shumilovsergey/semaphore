@@ -1,0 +1,9 @@
+prom_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
+prom_path: "/opt/prometheus"
+port: "9090"
+service_file_path: "/etc/systemd/system/prometheus.service"
+
+bin_path: "{{ prom_path }}/prometheus"
+config_path: "{{ prom_path }}/prometheus.yml"
+data_path: "{{ prom_path }}/data"
+rules_path: "{{ prom_path }}/rules"

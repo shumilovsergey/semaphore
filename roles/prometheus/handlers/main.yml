@@ -1,0 +1,10 @@
+- name: Restart prometheus
+  systemd:
+    name: prometheus
+    state: restarted
+
+- name: Reload prometheus config
+  uri:
+    url: "http://localhost:{{ port }}/-/reload"
+    method: POST
+    status_code: 200

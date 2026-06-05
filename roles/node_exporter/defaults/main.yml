@@ -1,0 +1,6 @@
+node_exporter_url: ""
+node_exporter_path: "/opt/node_exporter"
+port: "9100"
+service_file_path: "/etc/systemd/system/node_exporter.service"
+
+bin_path: "{{ node_exporter_path }}/node_exporter"
