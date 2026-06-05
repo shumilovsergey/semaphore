@@ -19,6 +19,6 @@
 
 Перейдите в ВАШ репозиторий и запустите
 
-```
-
+```bash
+curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads/main/tools/sync_shumilov_roles.sh | sudo bash
 ```
