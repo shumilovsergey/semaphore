@@ -1,0 +1,11 @@
+---
+
+- name: Setup home-lab
+  hosts: home-lab
+  gather_facts: true
+  ignore_unreachable: true
+  become: true
+
+  roles:
+    # - node_exporter
+    - prometheus

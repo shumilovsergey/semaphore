@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/prometheus/prometheus \
-  --config.file=/opt/prometheus/prometheus.yml \
-  --storage.tsdb.path=/opt/prometheus/data \
-  --web.listen-address=:9090 \
+ExecStart={{ bin_path }} \
+  --config.file={{ config_path }} \
+  --storage.tsdb.path={{ data_path }} \
+  --web.listen-address=:{{ port }} \
   --web.enable-lifecycle
 Restart=on-failure
 RestartSec=5

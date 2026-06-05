@@ -1,0 +1,59 @@
+- name: Create node_exporter directory
+  file:
+    path: "{{ node_exporter_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Check if service already exists
+  stat:
+    path: "{{ service_file_path }}"
+  register: service_file
+
+- name: Fail if port is already in use (first run only)
+  wait_for:
+    host: localhost
+    port: "{{ port }}"
+    state: stopped
+    timeout: 3
+  when: not service_file.stat.exists
+
+- name: Download node_exporter binary
+  get_url:
+    url: "{{ node_exporter_url }}"
+    dest: "{{ bin_path }}"
+    mode: "0755"
+    force: yes
+  notify: Restart node_exporter
+
+- name: Deploy systemd service file
+  template:
+    src: node_exporter.service.j2
+    dest: "{{ service_file_path }}"
+    mode: "0644"
+  when: not service_file.stat.exists
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: not service_file.stat.exists
+
+- name: Enable and start service (first run)
+  systemd:
+    name: node_exporter
+    state: started
+    enabled: yes
+  when: not service_file.stat.exists
+
+- name: Wait for node_exporter to come up
+  wait_for:
+    host: localhost
+    port: "{{ port }}"
+    state: started
+    timeout: 15
+
+- name: Health check
+  uri:
+    url: "http://localhost:{{ port }}/metrics"
+    status_code: 200
+  retries: 3
+  delay: 2

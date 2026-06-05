@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/opt/node_exporter/node_exporter \
-  --web.listen-address=:9100
+ExecStart={{ bin_path }} \
+  --web.listen-address=:{{ port }}
 Restart=on-failure
 RestartSec=5
 
