@@ -13,14 +13,12 @@
   become: true
   vars:
     # Переменные для ролей — перебивают defaults роли
-    # Полный список переменных см. в roles/README.md
     #
     # node_exporter_url: ""
     # prom_url: ""
 
   roles:
     # Порядок важен — роли выполняются сверху вниз
-    # Доступные роли см. в roles/README.md
     #
     - preflight
     # - node_exporter
