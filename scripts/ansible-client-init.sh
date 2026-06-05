@@ -24,18 +24,14 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Запрос публичного ключа
-echo "Введите публичный SSH ключ для пользователя: $USER"
-echo
-echo "Пример:"
-echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
-echo
-
-read -r -p "SSH public key: " SSH_KEY < /dev/tty
+SSH_KEY="$1"
 
 if [ -z "$SSH_KEY" ]; then
+    echo "Использование:"
+    echo "  curl -fsSL <url> | sudo bash -s \"<ssh public key>\""
     echo
-    echo "SSH ключ не может быть пустым ❌"
+    echo "Пример:"
+    echo "  curl -fsSL <url> | sudo bash -s \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...\""
     exit 1
 fi
 
