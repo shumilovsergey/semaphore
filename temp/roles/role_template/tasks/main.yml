@@ -1,0 +1,11 @@
+- name: Example task
+  ansible.builtin.package:
+    name: "{{ package_name | default('your-package') }}"
+    state: present
+
+- name: Deploy config
+  ansible.builtin.template:
+    src: config.j2
+    dest: /etc/your-service/config.conf
+    mode: "0644"
+  notify: Reload service           # имя должно совпадать с handlers/main.yml

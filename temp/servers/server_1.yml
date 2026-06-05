@@ -1,0 +1,9 @@
+- name: Setup server_1
+  hosts: server_1
+  become: true
+  vars:
+    nftables_ports:
+      - 22
+      - 8080
+  tasks:
+    - include_tasks: roles/nftables.yml

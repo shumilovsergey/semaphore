@@ -1,0 +1,4 @@
+- name: Reload service             # имя должно совпадать с notify в tasks
+  ansible.builtin.service:
+    name: your-service
+    state: reloaded
