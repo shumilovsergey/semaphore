@@ -24,6 +24,6 @@ temp/
 
 ## Подробнее 
 
-- [Про роли](./roles/role_template/README.md)
+- [Про роли](./roles/README.md)
 
 - [Про сервера](./servers/README.md)
