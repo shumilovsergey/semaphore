@@ -1,7 +1,7 @@
 ---
 
-- name: Setup home-lab
-  hosts: home-lab
+- name: Setup sh-homelab
+  hosts: sh-homelab
   gather_facts: true
   ignore_unreachable: true
   become: true
