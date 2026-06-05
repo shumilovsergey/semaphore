@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 
 - [Подробнее про роли](./roles/README.md)
 
-- [Как скачать мои роли в ваш репозиторий?](./tools/sync_shumilov_roles.md)
+- [Публичный репозиторий ролей](./tools/sync_shumilov_roles.md)
 
 
 
