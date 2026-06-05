@@ -1,6 +1,6 @@
 ## Semaphore
 
-![cover](./scripts/cover.png)
+![cover](./tools/cover.png)
 
 ## Структура репозитория
 
