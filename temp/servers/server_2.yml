@@ -12,12 +12,3 @@
   tasks:
     - include_tasks: roles/nftables.yml
     - include_tasks: roles/nginx.yml
-  handlers:
-    - name: Reload nftables        # ↓ эти три строки
-      service:                     #   придётся копировать
-        name: nftables             #   в каждый сервер
-        state: reloaded            #   где есть nftables
-    - name: Reload nginx           # ↓ и эти три строки
-      service:                     #   придётся копировать
-        name: nginx                #   в каждый сервер
-        state: reloaded            #   где есть nginx

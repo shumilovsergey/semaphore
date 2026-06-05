@@ -14,16 +14,4 @@
     - include_tasks: roles/nftables.yml
     - include_tasks: roles/nginx.yml
     - include_tasks: roles/prometheus.yml
-  handlers:
-    - name: Reload nftables        # ↓ точная копия
-      service:                     #   из server_2.yml
-        name: nftables
-        state: reloaded
-    - name: Reload nginx           # ↓ точная копия
-      service:                     #   из server_2.yml
-        name: nginx
-        state: reloaded
-    - name: Reload prometheus      # уникальный для этого сервера
-      service:
-        name: prometheus
-        state: reloaded
+
