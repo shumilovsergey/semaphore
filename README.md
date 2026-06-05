@@ -5,7 +5,7 @@
 ## Структура репозитория
 
 ```
-playbooks/          — уникальные задачи под конкретные приложения
+playbooks/          — уникальные задачи под конкретные ситуции
   web_apps/
   github_clone.yml
 
@@ -17,9 +17,10 @@ roles/              — переиспользуемые рецепты (не з
     files/          — статические файлы
     templates/      — jinja2 шаблоны (.j2)
 
-servers/            — конфигурация серверов
-  all.yml           — роли и переменные для всех серверов
-  <hostname>.yml    — роли и переменные конкретного сервера
+servers/                  — конфигурация серверов
+  0_server_template.yml   — шаблон для нового сервера (скопируй и переименуй)
+  all.yml                 — роли и переменные для всех серверов
+  <hostname>.yml          — роли и переменные конкретного сервера
 
 tools/            — не-ansible: скрипты инициализации, гайды
 ```
@@ -43,6 +44,8 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 - [Установка Semaphore](./tools/install.md)
 
 - [Подробнее про роли](./roles/README.md)
+
+- [Подробнее про сервера](./servers/README.md)
 
 - [Публичный репозиторий ролей](./tools/sync_shumilov_roles.md)
 
