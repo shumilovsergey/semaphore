@@ -1,6 +1,6 @@
 ## Semaphore
 
-![cover](./tools/cover.png)
+![cover](./scripts/cover.png)
 
 ## Установка и запуск Semaphore. GUI для управления Ansible инфраструктурой.
 
