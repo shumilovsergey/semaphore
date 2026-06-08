@@ -45,6 +45,14 @@
     - disk.yml
   notify: Reload prometheus config
 
+- name: Set ownership on prometheus directory
+  file:
+    path: "{{ prom_path }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    recurse: yes
+
 - name: Deploy systemd service file
   template:
     src: prometheus.service.j2
