@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+User={{ service_user }}
 ExecStart={{ bin_path }} \
   --config.file={{ config_path }} \
   --storage.tsdb.path={{ data_path }} \
