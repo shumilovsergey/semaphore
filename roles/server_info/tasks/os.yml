@@ -1,3 +1,7 @@
 - name: info | collect OS
   set_fact:
     info_os: "{{ ansible_distribution }} {{ ansible_distribution_version }} ({{ ansible_architecture }})"
+
+- name: info | output OS
+  debug:
+    msg: "{{ inventory_hostname }}: {{ info_os }}"

@@ -23,3 +23,7 @@
       {% else %}direct /etc/resolv.conf
       {% endif %}
     info_dns_nameservers: "{{ _nameservers.stdout }}"
+
+- name: info | output DNS
+  debug:
+    msg: "{{ inventory_hostname }}: {{ info_dns_manager | trim }} / {{ info_dns_nameservers }}"
