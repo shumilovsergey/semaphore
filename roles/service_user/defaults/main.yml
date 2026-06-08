@@ -1,0 +1,2 @@
+service_user_name: service_ansible
+service_user_shell: /sbin/nologin

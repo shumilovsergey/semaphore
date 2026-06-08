@@ -12,3 +12,4 @@
   vars:
   roles:
     - preflight
+    - service_user
