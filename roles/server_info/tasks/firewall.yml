@@ -1,0 +1,50 @@
+- name: info | firewall - check ufw
+  command: which ufw
+  register: _ufw_bin
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - check ufw active
+  command: systemctl is-active ufw
+  register: _ufw_active
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - check nftables
+  command: which nft
+  register: _nft_bin
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - check nftables active
+  command: systemctl is-active nftables
+  register: _nft_active
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - check iptables
+  command: which iptables
+  register: _ipt_bin
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - check iptables active
+  command: systemctl is-active iptables
+  register: _ipt_active
+  changed_when: false
+  failed_when: false
+
+- name: info | collect firewall
+  set_fact:
+    info_firewall:
+      ufw: "{{ 'not installed' if _ufw_bin.rc != 0 else ('active' if _ufw_active.rc == 0 else 'inactive') }}"
+      nftables: "{{ 'not installed' if _nft_bin.rc != 0 else ('active' if _nft_active.rc == 0 else 'inactive') }}"
+      iptables: "{{ 'not installed' if _ipt_bin.rc != 0 else ('active' if _ipt_active.rc == 0 else 'inactive') }}"
+
+- name: info | output firewall
+  debug:
+    msg:
+      - "=== firewall: {{ inventory_hostname }} ==="
+      - "ufw:      {{ info_firewall.ufw }}"
+      - "nftables: {{ info_firewall.nftables }}"
+      - "iptables: {{ info_firewall.iptables }}"
