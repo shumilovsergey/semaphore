@@ -1,0 +1,25 @@
+- name: info | DNS - check systemd-resolved
+  command: systemctl is-active systemd-resolved
+  register: _systemd_resolved
+  changed_when: false
+  failed_when: false
+
+- name: info | DNS - check NetworkManager
+  command: systemctl is-active NetworkManager
+  register: _nm
+  changed_when: false
+  failed_when: false
+
+- name: info | DNS - read nameservers
+  shell: grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '\n' ' '
+  register: _nameservers
+  changed_when: false
+
+- name: info | collect DNS
+  set_fact:
+    info_dns_manager: >-
+      {% if _systemd_resolved.rc == 0 %}systemd-resolved
+      {% elif _nm.rc == 0 %}NetworkManager
+      {% else %}direct /etc/resolv.conf
+      {% endif %}
+    info_dns_nameservers: "{{ _nameservers.stdout }}"

@@ -13,3 +13,4 @@
   roles:
     - preflight
     - service_user
+    - server_info
