@@ -1,7 +1,8 @@
 prom_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
 prom_path: "/opt/prometheus"
-port: "9090"
+prometheus_port: "9090"
 service_file_path: "/etc/systemd/system/prometheus.service"
+service_user: service_ansible
 
 bin_path: "{{ prom_path }}/prometheus"
 config_path: "{{ prom_path }}/prometheus.yml"

@@ -16,7 +16,7 @@
 - name: Fail if port is already in use (first run only)
   wait_for:
     host: localhost
-    port: "{{ port }}"
+    port: "{{ prometheus_port }}"
     state: stopped
     timeout: 3
   when: not service_file.stat.exists
@@ -50,12 +50,13 @@
     src: prometheus.service.j2
     dest: "{{ service_file_path }}"
     mode: "0644"
-  when: not service_file.stat.exists
+  register: service_file_deployed
+  notify: Restart prometheus
 
 - name: Reload systemd daemon
   systemd:
     daemon_reload: yes
-  when: not service_file.stat.exists
+  when: service_file_deployed.changed
 
 - name: Enable and start service (first run)
   systemd:
@@ -67,13 +68,13 @@
 - name: Wait for prometheus to come up
   wait_for:
     host: localhost
-    port: "{{ port }}"
+    port: "{{ prometheus_port }}"
     state: started
     timeout: 15
 
 - name: Health check
   uri:
-    url: "http://localhost:{{ port }}/-/healthy"
+    url: "http://localhost:{{ prometheus_port }}/-/healthy"
     status_code: 200
   retries: 3
   delay: 2
