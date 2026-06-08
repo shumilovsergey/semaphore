@@ -1,0 +1,23 @@
+- name: info | UFW - check installed
+  command: which ufw
+  register: _ufw_installed
+  changed_when: false
+  failed_when: false
+
+- name: info | UFW - check active
+  command: systemctl is-active ufw
+  register: _ufw_active
+  changed_when: false
+  failed_when: false
+
+- name: info | collect UFW
+  set_fact:
+    info_ufw: >-
+      {% if _ufw_installed.rc != 0 %}not installed
+      {% elif _ufw_active.rc == 0 %}installed / active
+      {% else %}installed / inactive
+      {% endif %}
+
+- name: info | output UFW
+  debug:
+    msg: "{{ inventory_hostname }}: {{ info_ufw | trim }}"
