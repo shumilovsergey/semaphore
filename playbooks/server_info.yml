@@ -1,0 +1,8 @@
+---
+
+- name: Collect server info
+  hosts: all
+  gather_facts: true
+  become: false
+  roles:
+    - server_info

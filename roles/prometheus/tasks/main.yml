@@ -84,5 +84,4 @@
   uri:
     url: "http://localhost:{{ prometheus_port }}/-/healthy"
     status_code: 200
-  retries: 3
-  delay: 2
+
