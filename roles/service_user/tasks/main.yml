@@ -1,0 +1,7 @@
+- name: Create service user
+  ansible.builtin.user:
+    name: "{{ service_user_name }}"
+    system: yes
+    shell: "{{ service_user_shell }}"
+    create_home: no
+    state: present
