@@ -10,20 +10,62 @@
   changed_when: false
   failed_when: false
 
-- name: info | DNS - read nameservers
-  shell: grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '\n' ' '
-  register: _nameservers
+# systemd-resolved: find the interface with +DefaultRoute
+- name: info | DNS - get default route interface (systemd-resolved)
+  shell: >
+    resolvectl status |
+    awk '/^Link [0-9]+ \(/{iface=$3; gsub(/[()]/,"",iface)} /\+DefaultRoute/{print iface; exit}'
+  register: _sr_iface
   changed_when: false
+  failed_when: false
+  when: _systemd_resolved.rc == 0
+
+- name: info | DNS - get upstream servers (systemd-resolved)
+  shell: "resolvectl dns | grep '({{ _sr_iface.stdout }})' | sed 's/.*: //'"
+  register: _sr_dns
+  changed_when: false
+  failed_when: false
+  when: _systemd_resolved.rc == 0
+
+- name: info | DNS - get search domain (systemd-resolved)
+  shell: "resolvectl domain | grep '({{ _sr_iface.stdout }})' | sed 's/.*: //'"
+  register: _sr_domain
+  changed_when: false
+  failed_when: false
+  when: _systemd_resolved.rc == 0
+
+# resolv.conf path (NetworkManager or direct)
+- name: info | DNS - get default route interface (resolv.conf)
+  shell: ip route show default | awk '/default/{print $5; exit}'
+  register: _rc_iface
+  changed_when: false
+  failed_when: false
+  when: _systemd_resolved.rc != 0
+
+- name: info | DNS - get nameservers (resolv.conf)
+  shell: grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '\n' ' '
+  register: _rc_dns
+  changed_when: false
+  when: _systemd_resolved.rc != 0
+
+- name: info | DNS - get search domain (resolv.conf)
+  shell: grep -E '^(search|domain)' /etc/resolv.conf | awk '{print $2}' | head -1
+  register: _rc_domain
+  changed_when: false
+  failed_when: false
+  when: _systemd_resolved.rc != 0
 
 - name: info | collect DNS
   set_fact:
     info_dns_manager: >-
-      {% if _systemd_resolved.rc == 0 %}systemd-resolved
-      {% elif _nm.rc == 0 %}NetworkManager
-      {% else %}direct /etc/resolv.conf
-      {% endif %}
-    info_dns_nameservers: "{{ _nameservers.stdout }}"
+      {% if _systemd_resolved.rc == 0 %}systemd-resolved{% elif _nm.rc == 0 %}NetworkManager{% else %}resolv.conf{% endif %}
+    info_dns_iface: >-
+      {% if _systemd_resolved.rc == 0 %}{{ _sr_iface.stdout | default('') }}{% else %}{{ _rc_iface.stdout | default('') }}{% endif %}
+    info_dns_servers: >-
+      {% if _systemd_resolved.rc == 0 %}{{ _sr_dns.stdout | default('') }}{% else %}{{ _rc_dns.stdout | default('') | trim }}{% endif %}
+    info_dns_domain: >-
+      {% if _systemd_resolved.rc == 0 %}{{ _sr_domain.stdout | default('') }}{% else %}{{ _rc_domain.stdout | default('') }}{% endif %}
 
 - name: info | output DNS
   debug:
-    msg: "{{ inventory_hostname }}: {{ info_dns_manager | trim }} / {{ info_dns_nameservers }}"
+    msg: "{{ inventory_hostname }}: {{ info_dns_manager | trim }} | {{ info_dns_iface | trim }} | {{ info_dns_servers | trim }} | {{ info_dns_domain | trim }}"
