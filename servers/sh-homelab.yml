@@ -11,3 +11,4 @@
   roles:
     - preflight
     - prometheus
+    - node_exporter

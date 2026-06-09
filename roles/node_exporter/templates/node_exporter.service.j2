@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User={{ service_user }}
 ExecStart={{ bin_path }} \
-  --web.listen-address=:{{ port }}
+  --web.listen-address=:{{ node_exporter_port }}
 Restart=on-failure
 RestartSec=5
 
