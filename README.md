@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 - Создать ansible пользователя на клиенте
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads/main/tools/ansible-client-init.sh | sudo bash -s "PUT_HERE_PUBKEY"
+curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads/main/tools/ansible-client-init.sh | sudo bash -s "PUT_HERE_PUBKEY" "OPTIONAL-IP-ALLOW-UFW-RULE"
 ```
 
 

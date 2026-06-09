@@ -6,8 +6,6 @@ set -e
 # Semaphore Ansible Client Bootstrap
 # ==========================================
 
-# ANSIBLE_IP=""
-
 USER="ansible"
 HOME_DIR="/home/$USER"
 SSH_DIR="$HOME_DIR/.ssh"
@@ -25,15 +23,16 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 SSH_KEY="$1"
+SEMAPHORE_IP="$2"
 
 if [ -z "$SSH_KEY" ] || [ "$SSH_KEY" = "PUT_HERE_PUBKEY" ]; then
     echo "❌ SSH ключ не передан или не заменён."
     echo
     echo "Использование:"
-    echo "  curl -fsSL <url> | sudo bash -s \"<ssh public key>\""
+    echo "  curl -fsSL <url> | sudo bash -s \"<ssh public key>\" \"<semaphore ip>\""
     echo
     echo "Пример:"
-    echo "  curl -fsSL <url> | sudo bash -s \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...\""
+    echo "  curl -fsSL <url> | sudo bash -s \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...\" \"10.10.30.100\""
     exit 1
 fi
 
@@ -47,7 +46,6 @@ else
 
     useradd -m -s /bin/bash "$USER"
 
-    # (опционально) добавить в sudo группу
     if getent group sudo >/dev/null; then
         usermod -aG sudo "$USER"
     elif getent group wheel >/dev/null; then
@@ -88,10 +86,17 @@ chown -R "$USER:$USER" "$SSH_DIR"
 
 echo "Права настроены ✅"
 
-# echo
-# echo "[5/5] Разрешаю SSH от Ansible-сервера: $ANSIBLE_IP"
-# ufw allow from "$ANSIBLE_IP" to any port 22 proto tcp comment 'ansible ssh'
-# ufw reload
+echo
+echo "[5/5] Проверка UFW..."
+
+if [ -z "$SEMAPHORE_IP" ]; then
+    echo "SEMAPHORE_IP не передан — пропускаем ✅"
+elif command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+    ufw allow from "$SEMAPHORE_IP" to any port 22 proto tcp comment 'Semaphore'
+    echo "UFW правило добавлено для $SEMAPHORE_IP ✅"
+else
+    echo "UFW не активен — пропускаем ✅"
+fi
 
 echo
 echo "=========================================="
