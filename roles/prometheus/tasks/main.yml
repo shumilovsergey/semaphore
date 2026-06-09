@@ -1,3 +1,9 @@
+- name: Guard — only one host allowed
+  fail:
+    msg: "This role must target exactly one host, got: {{ ansible_play_hosts | join(', ') }}"
+  when: ansible_play_hosts | length > 1
+  run_once: true
+
 - name: Create prometheus directories
   file:
     path: "{{ item }}"
@@ -45,13 +51,17 @@
     - disk.yml
   notify: Reload prometheus config
 
-- name: Set ownership on prometheus directory
+- name: Set ownership on prometheus directories
   file:
-    path: "{{ prom_path }}"
+    path: "{{ item }}"
     state: directory
     owner: "{{ service_user }}"
     group: "{{ service_user }}"
     recurse: yes
+  loop:
+    - "{{ prom_path }}"
+    - "{{ data_path }}"
+    - "{{ rules_path }}"
 
 - name: Deploy systemd service file
   template:
