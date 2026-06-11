@@ -1,0 +1,16 @@
+---
+- name: Validate dns_manager
+  fail:
+    msg: "dns_manager must be one of: resolv_conf | systemd_resolved | networkmanager"
+  when: dns_manager not in ['resolv_conf', 'systemd_resolved', 'networkmanager']
+
+- name: Validate dns_servers
+  fail:
+    msg: "dns_servers must not be empty"
+  when: dns_servers | length == 0
+
+- name: Assert declared manager matches actual host state
+  include_tasks: assert_manager.yml
+
+- name: Apply DNS config ({{ dns_manager }})
+  include_tasks: "{{ dns_manager }}.yml"
