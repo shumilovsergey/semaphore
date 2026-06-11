@@ -1,0 +1,4 @@
+---
+dns_servers: []    # required: list of nameserver IPs
+dns_domain: ""     # optional: search domain (e.g. expoforum.ru)
+dns_manager: ""    # required: resolv_conf | systemd_resolved | networkmanager

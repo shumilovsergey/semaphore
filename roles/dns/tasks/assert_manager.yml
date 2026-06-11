@@ -1,0 +1,41 @@
+---
+# Detects the actual DNS manager on the host and fails if it does not
+# match dns_manager. Runs before any changes are written.
+
+- name: Stat /etc/resolv.conf
+  stat:
+    path: /etc/resolv.conf
+  register: resolv_stat
+
+- name: Check systemd-resolved status
+  command: systemctl is-active systemd-resolved
+  register: resolved_active
+  changed_when: false
+  failed_when: false
+
+- name: Check NetworkManager status
+  command: systemctl is-active NetworkManager
+  register: nm_active
+  changed_when: false
+  failed_when: false
+
+- name: Detect actual DNS manager
+  set_fact:
+    detected_manager: >-
+      {{
+        'systemd_resolved' if (resolv_stat.stat.islnk | default(false) and
+                               'systemd' in resolv_stat.stat.lnk_target | default('')) else
+        'networkmanager'   if nm_active.stdout == 'active' else
+        'resolv_conf'
+      }}
+
+- name: Fail if declared manager does not match detected manager
+  fail:
+    msg: >-
+      dns_manager='{{ dns_manager }}' but detected '{{ detected_manager }}'.
+      Fix dns_manager in your host vars or investigate the server manually.
+  when: dns_manager != detected_manager
+
+- name: Manager check passed
+  debug:
+    msg: "Declared and detected manager match: {{ dns_manager }}"

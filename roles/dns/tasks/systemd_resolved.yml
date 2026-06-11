@@ -1,30 +1,28 @@
 ---
+# Drop-in file — survives package upgrades, easy to audit, idempotent.
+# Main config (/etc/systemd/resolved.conf) is left untouched.
 
-# Управление DNS через systemd-resolved
-# Применяется на: Ubuntu 22/24, Debian 12/13, Astra 1.8
+- name: Create resolved.conf.d directory
+  file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    mode: "0755"
 
-- name: Развернуть resolved.conf
+- name: Deploy DNS drop-in config
   copy:
-    dest: /etc/systemd/resolved.conf
+    dest: /etc/systemd/resolved.conf.d/dns.conf
     content: |
       [Resolve]
       DNS={{ dns_servers | join(' ') }}
-      FallbackDNS={{ dns_fallback | join(' ') }}
-      Domains={{ dns_search | default('') }}
+      {% if dns_domain %}
+      Domains={{ dns_domain }}
+      {% endif %}
     mode: "0644"
-  notify: restart systemd-resolved
+  notify: Restart systemd-resolved
 
-# resolv.conf должен быть симлинком на stub-резолвер systemd
-# иначе приложения будут обходить systemd-resolved
-- name: Убедиться что /etc/resolv.conf — симлинк на stub-резолвер
+- name: Ensure /etc/resolv.conf points to stub resolver
   file:
     src: /run/systemd/resolve/stub-resolv.conf
     dest: /etc/resolv.conf
     state: link
     force: yes
-
-- name: Перезапустить systemd-resolved
-  systemd:
-    name: systemd-resolved
-    state: restarted
-  listen: restart systemd-resolved
