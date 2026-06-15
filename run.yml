@@ -11,11 +11,10 @@
 # servers/<hostname>.yml — это файл ДАННЫХ, а не отдельный плейбук:
 #   server_roles: [список ролей по порядку]
 #   плюс любые переменные ролей (перебивают defaults роли)
-#
-# preflight запускается всегда и первым — в server_roles его указывать не нужно.
+
 
 - name: Configure servers
-  hosts: "{{ target | mandatory('Укажи target в Extra Variables: all, имя группы или хоста') }}"
+  hosts: "{{ target }}"
   gather_facts: true
   become: true
 
