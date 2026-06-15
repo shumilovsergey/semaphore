@@ -1,0 +1,57 @@
+---
+# nginx и certbot должны быть уже установлены на хосте (см. README роли).
+
+- name: Ensure nginx and certbot are available
+  ansible.builtin.shell: "command -v {{ item }}"
+  register: _bin_check
+  changed_when: false
+  failed_when: _bin_check.rc != 0
+  loop:
+    - nginx
+    - certbot
+  loop_control:
+    label: "{{ item }}"
+
+- name: certbot_email must be set when sites are defined
+  ansible.builtin.assert:
+    that: certbot_email | length > 0
+    fail_msg: "certbot_email не задан, а в nginx_sites есть сайты"
+  when: nginx_sites | length > 0
+
+- name: vpn_allow_ip must be set when a site is vpn_only
+  ansible.builtin.assert:
+    that: vpn_allow_ip | length > 0
+    fail_msg: "vpn_allow_ip не задан, а у сайта стоит vpn_only: true"
+  when: nginx_sites | selectattr('vpn_only', 'defined') | selectattr('vpn_only') | list | length > 0
+
+
+- name: Deploy nginx site config (create if absent)
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: "{{ conf_dir }}/{{ item.name }}.conf"
+    mode: "0644"
+    force: false
+  loop: "{{ nginx_sites }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.domain }})"
+  notify: Reload nginx
+
+- name: Validate nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+
+- name: Reload nginx before certbot
+  ansible.builtin.meta: flush_handlers
+
+- name: Obtain and install certificate with certbot
+  ansible.builtin.command: >
+    certbot --nginx -n --agree-tos
+    -m {{ certbot_email }}
+    -d {{ item.domain }}
+    --redirect
+  args:
+    creates: "/etc/letsencrypt/live/{{ item.domain }}/fullchain.pem"
+  loop: "{{ nginx_sites }}"
+  loop_control:
+    label: "{{ item.domain }}"

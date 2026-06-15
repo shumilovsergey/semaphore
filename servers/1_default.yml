@@ -1,10 +1,5 @@
 ---
 
-# Передай target в Extra Variables в Semaphore:
-#   target: all             — все серверы
-#   target: web_servers     — группа из inventory
-#   target: vm-grafana      — конкретный хост
-
 - name: Common setup
   hosts: "{{ target | mandatory('Укажи target в Extra Variables: all, имя группы или хоста') }}"
   gather_facts: true

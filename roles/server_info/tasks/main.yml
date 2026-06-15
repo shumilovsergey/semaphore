@@ -1,3 +1,6 @@
 - include_tasks: os.yml
+  tags: [os]
 - include_tasks: dns.yml
+  tags: [dns]
 - include_tasks: firewall.yml
+  tags: [firewall]
