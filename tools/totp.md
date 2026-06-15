@@ -14,9 +14,18 @@
 }
 ```
 
+Добавить в unit-файл Semaphore `/etc/systemd/system/semaphore.service`:
+
+```bash
+Environment=SEMAPHORE_TOTP_ENABLED=true
+Environment=SEMAPHORE_TOTP_ALLOW_RECOVERY=true
+Environment=SEMAPHORE_TOTP_ISSUER=Semaphore
+```
+
 Перезапустить сервис:
 
 ```bash
+systemctl daemon-reload
 systemctl restart semaphore
 ```
 

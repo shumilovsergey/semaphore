@@ -1,14 +1,23 @@
 ---
 
-- name: Setup sh-homelab
-  hosts: sh-homelab
-  gather_facts: true
-  ignore_unreachable: true
-  become: true
+# Конфиг сервера sh-homelab для servers/run.yml
+# Роли выполняются в указанном порядке. preflight добавляется автоматически.
 
-  vars:
+server_roles:
+  - prometheus
+  - node_exporter
+  - server_info
 
-  roles:
-    - preflight
-    - prometheus
-    - node_exporter
+# --- переменные ролей (перебивают defaults) ---
+# Здесь продублированы значения из defaults как пример. Можно оставить
+# только те строки, которые надо изменить — остальное возьмётся из defaults.
+
+# prometheus
+prom_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
+prom_path: "/opt/prometheus"
+prometheus_port: "9090"
+
+# node_exporter
+node_exporter_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/node_exporter"
+node_exporter_path: "/opt/node_exporter"
+node_exporter_port: "9100"
