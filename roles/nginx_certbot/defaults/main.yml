@@ -1,0 +1,17 @@
+---
+# Каталог конфигов nginx
+conf_dir: /etc/nginx/conf.d
+
+# Email для регистрации в Let's Encrypt. Обязателен, если есть сайты.
+certbot_email: ""
+
+# IP, которому разрешён доступ при vpn_only: true (один на сервер).
+vpn_allow_ip: ""
+
+# Список сайтов. Заполняется в servers/<hostname>.yml
+# nginx_sites:
+#   - name: my              # -> /etc/nginx/conf.d/my.conf
+#     domain: my.domain.com
+#     port: 8080
+#     vpn_only: false       # true -> allow {{ vpn_allow_ip }}; deny all;
+nginx_sites: []

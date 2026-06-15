@@ -1,16 +1,9 @@
 ---
 
-# Конфиг сервера sh-homelab для servers/run.yml
-# Роли выполняются в указанном порядке. preflight добавляется автоматически.
-
 server_roles:
   - prometheus
   - node_exporter
-  - server_info
 
-# --- переменные ролей (перебивают defaults) ---
-# Здесь продублированы значения из defaults как пример. Можно оставить
-# только те строки, которые надо изменить — остальное возьмётся из defaults.
 
 # prometheus
 prom_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"

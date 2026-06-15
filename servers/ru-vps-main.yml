@@ -1,0 +1,13 @@
+---
+
+#---roles
+server_roles:
+  - nginx_certbot
+
+#---vars
+
+certbot_email: wumilovsergey@gmail.com
+vpn_allow_ip: 5.189.254.175
+
+nginx_sites:
+  - { name: menu,   domain: menu.sh-development.ru,   port: 9005, vpn_only: false }
