@@ -10,4 +10,8 @@ certbot_email: wumilovsergey@gmail.com
 vpn_allow_ip: 5.189.254.175
 
 nginx_sites:
+  # public
   - { name: menu,   domain: menu.sh-development.ru,   port: 9006, vpn_only: false }
+
+  # privat
+  - { name: semaphore,   domain: semaphore.sh-development.ru,   port: 9005, vpn_only: true }
