@@ -12,6 +12,19 @@ vpn_allow_ip: 5.189.254.175
 nginx_sites:
   # public
   - { name: menu,   domain: menu.sh-development.ru,   port: 9006, vpn_only: false }
+  - { name: auth-center,   domain: auth-center.sh-development.ru,   port: 9103, vpn_only: false }
+  - { name: auth,   domain: auth.sh-development.ru,   port: 9104, vpn_only: false }
+  - { name: blur,   domain: blur.sh-development.ru,   port: 9002, vpn_only: false }
+  - { name: wgetbash,   domain: wgetbash.sh-development.ru,   port: 9105, vpn_only: false }
+  - { name: youtrack,   domain: youtrack.sh-development.ru,   port: 9999, vpn_only: false }
+  - { name: zhenshen,   domain: zhenshen.sh-development.ru,   port: 10001, vpn_only: false }
+  - { name: ntfy,   domain: ntfy.sh-development.ru,   port: 9107, vpn_only: false }
+  - { name: sendbox,   domain: sendbox.sh-development.ru,   port: 9101, vpn_only: false }
 
   # privat
   - { name: semaphore,   domain: semaphore.sh-development.ru,   port: 9005, vpn_only: true }
+  - { name: buba-cloud,   domain: buba-cloud.sh-development.ru,   port: 9102, vpn_only: true }
+  - { name: gitea,   domain: gitea.sh-development.ru,   port: 9004, vpn_only: true }
+  - { name: grafana,   domain: grafana.sh-development.ru,   port: 3000, vpn_only: true }
+  - { name: prometheus,   domain: prometheus.sh-development.ru,   port: 9090, vpn_only: true }
+  - { name: vault,   domain: vault.sh-development.ru,   port: 9000, vpn_only: true }
