@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 
 - [Подробнее про сервера](./servers/README.md)
 
-- [Подключение TOPT](./tools/topt.md)
+- [Подключение TOTP](./tools/totp.md)
 
 - [Публичный репозиторий ролей](./tools/sync_shumilov_roles.md)
 
