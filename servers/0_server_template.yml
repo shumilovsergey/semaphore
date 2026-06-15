@@ -1,25 +1,21 @@
 ---
 
 # Скопируй этот файл, переименуй в <hostname>.yml
-# Имя файла должно совпадать с именем хоста в inventory
+# Имя файла должно совпадать с именем хоста в inventory.
+#
+# Это файл ДАННЫХ для servers/run.yml, а не отдельный плейбук.
 
-# идеи на будущее 
+# идеи на будущее
 # для каждого сервера создавать список админов, которым можно туда ходить
 
-- name: Setup <hostname>
-  hosts: <hostname>
-  gather_facts: true
-  ignore_unreachable: true
-  become: true
-  vars:
-    # Переменные для ролей — перебивают defaults роли
-    #
-    # node_exporter_url: ""
-    # prom_url: ""
+# Роли для этого сервера — выполняются по порядку.
+# preflight запускается автоматически и первым, тут его указывать не нужно.
+server_roles: []
+# Пример:
+# server_roles:
+#   - node_exporter
+#   - prometheus
 
-  roles:
-    # Порядок важен — роли выполняются сверху вниз
-    #
-    - preflight
-    # - node_exporter
-    # - prometheus
+# Переменные ролей — перебивают defaults роли
+# node_exporter_url: ""
+# prom_url: ""

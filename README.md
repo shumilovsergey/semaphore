@@ -6,6 +6,7 @@
 
 ```
 ansible.cfg             — конфигурация
+run.yml                 — главный плейбук: разворачивает servers/<hostname>.yml по target
 
 playbooks/              — уникальные задачи под конкретные ситуации
   web_apps/

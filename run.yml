@@ -1,0 +1,46 @@
+---
+
+# Главный плейбук. Для каждого выбранного сервера читает его конфиг
+# из servers/<hostname>.yml и запускает перечисленные там роли.
+#
+# target передаётся через Extra Variables в Semaphore:
+#   target: all          — все серверы
+#   target: web_servers  — группа из inventory
+#   target: vm-grafana   — конкретный хост
+#
+# servers/<hostname>.yml — это файл ДАННЫХ, а не отдельный плейбук:
+#   server_roles: [список ролей по порядку]
+#   плюс любые переменные ролей (перебивают defaults роли)
+#
+# preflight запускается всегда и первым — в server_roles его указывать не нужно.
+
+- name: Configure servers
+  hosts: "{{ target | mandatory('Укажи target в Extra Variables: all, имя группы или хоста') }}"
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Load per-server config (servers/<hostname>.yml)
+      include_vars: "{{ item }}"
+      with_first_found:
+        - files:
+            - "{{ playbook_dir }}/servers/{{ inventory_hostname }}.yml"
+          skip: true
+
+  roles:
+    # preflight всегда первым, для всех серверов
+    - preflight
+    - service_user
+
+  tasks:
+    - name: Warn if no per-server config found
+      debug:
+        msg: "Нет файла servers/{{ inventory_hostname }}.yml — выполнен только preflight."
+      when: server_roles is not defined
+
+    - name: Run per-server roles
+      include_role:
+        name: "{{ server_role }}"
+      loop: "{{ server_roles | default([]) }}"
+      loop_control:
+        loop_var: server_role
