@@ -1,0 +1,38 @@
+---
+
+- name: Check DNS resolution
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+
+  vars:
+    dns_check_hosts:
+      - mydomain.ru
+      - app.mydomain.ru
+
+  tasks:
+    - name: Resolve each host via system resolver
+      ansible.builtin.command: "getent hosts {{ item }}"
+      register: dns_check_result
+      changed_when: false
+      failed_when: dns_check_result.rc != 0
+      loop: "{{ dns_check_hosts }}"
+
+    - name: Show resolution results
+      ansible.builtin.debug:
+        msg: "{{ item.item }} -> {{ item.stdout_lines | join(' | ') | default('FAILED', true) }}"
+      loop: "{{ dns_check_result.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Show effective resolver config
+      ansible.builtin.shell: |
+        echo -n "resolv.conf: "; grep -E '^(nameserver|search)' /etc/resolv.conf | tr '\n' ' '
+        echo -n " || resolvectl: "; resolvectl status 2>/dev/null | grep -i "DNS Servers" | tr '\n' ' ' || true
+        echo -n " || nmcli: "; nmcli dev show 2>/dev/null | grep -i "IP4.DNS" | tr '\n' ' ' || true
+      register: resolver_config
+      changed_when: false
+
+    - name: Show resolvers
+      ansible.builtin.debug:
+        msg: "{{ resolver_config.stdout }}"
