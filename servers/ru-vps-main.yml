@@ -11,6 +11,7 @@ vpn_allow_ip: 5.189.254.175
 
 nginx_sites:
   # public
+  - { name: bite,   domain: bite.sh-development.ru,   port: 9007, vpn_only: false }
   - { name: menu,   domain: menu.sh-development.ru,   port: 9006, vpn_only: false }
   - { name: auth-center,   domain: auth-center.sh-development.ru,   port: 9103, vpn_only: false }
   - { name: auth,   domain: auth.sh-development.ru,   port: 9104, vpn_only: false }
