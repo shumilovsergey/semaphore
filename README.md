@@ -1,6 +1,6 @@
 ## Semaphore
 
-![cover](./tools/cover.png)
+![cover](/tools/baner.webp)
 
 ## Структура репозитория
 
