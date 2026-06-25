@@ -1,6 +1,11 @@
-- include_tasks: os.yml
-  tags: [os]
-- include_tasks: dns.yml
-  tags: [dns]
-- include_tasks: firewall.yml
-  tags: [firewall]
+- name: server_info | metric must be set
+  assert:
+    that:
+      - metric is defined
+      - metric | length > 0
+    fail_msg: >-
+      Не задан metric. Передай его в Extra Variables, например metric=dns.
+      Доступные метрики — файлы в roles/server_info/tasks/ (os, dns, firewall, ...).
+
+- name: server_info | run metric "{{ metric }}"
+  include_tasks: "{{ metric }}.yml"

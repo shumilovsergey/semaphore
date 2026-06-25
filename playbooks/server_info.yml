@@ -1,15 +1,19 @@
 ---
 
-# Сбор информации о серверах. Роль server_info разбита на разделы (теги):
-#   os, dns, firewall
+# Сбор информации о серверах. Роль server_info — это набор метрик,
+# по одному файлу на метрику: roles/server_info/tasks/<metric>.yml
+#   os, dns, firewall, ...
 #
-# Запуск всех разделов:   без --tags
-# Только нужные разделы:   --tags dns        / --tags os,firewall
+# За один запуск выполняется ОДНА метрика.
 #
-# target в Extra Variables: all | имя группы | hostname (по умолчанию all)
+# Extra Variables в Semaphore:
+#   target — all | имя группы | hostname   
+#   metric — имя файла метрики без .yml     
+#
+# Пример: target=web_servers metric=dns  → выполнит dns.yml на web_servers.
 
 - name: Collect server info
-  hosts: "{{ target | default('all') }}"
+  hosts: "{{ target }}"
   gather_facts: true
   become: false
   roles:
