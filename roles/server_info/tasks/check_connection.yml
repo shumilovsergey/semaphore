@@ -1,0 +1,7 @@
+- name: info | connection - ping over SSH
+  ansible.builtin.ping:
+  register: _ping
+
+- name: info | output connection
+  debug:
+    msg: "{{ inventory_hostname }}: SSH OK ({{ _ping.ping | default('') }})"
