@@ -1,0 +1,40 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible (role: nft). Do not edit — changes will be overwritten.
+
+# declare + delete = idempotent reload of ONLY this table;
+# tables of other services (docker, fail2ban, ...) are not touched
+table inet {{ nft_table_name }}
+delete table inet {{ nft_table_name }}
+
+table inet {{ nft_table_name }} {
+    # prerouting @ {{ nft_priority }}: after conntrack (-200), before
+    # docker DNAT (-100) — one chain covers host services AND
+    # docker-published ports, matching the original destination port.
+    chain prerouting {
+        type filter hook prerouting priority {{ nft_priority }}; policy {{ nft_input_policy }};
+
+        iif "lo" accept
+{% for iface in nft_accept_ifaces %}
+        iifname "{{ iface }}" accept
+{% endfor %}
+        ct state established,related accept
+        ct state invalid drop
+{% if nft_allow_icmp %}
+        meta l4proto { icmp, ipv6-icmp } accept
+{% endif %}
+{% if nft_allow_dhcp %}
+        udp dport 68 accept comment "dhcp client"
+{% endif %}
+
+{% for r in nft_allow_input + nft_allow_input_extra %}
+{%   set port = '{ ' ~ (r.port | join(', ')) ~ ' }' if (r.port is iterable and r.port is not string) else r.port %}
+        {{ ('ip saddr ' ~ r.from ~ ' ') if r.from is defined else '' }}{{ r.proto | default('tcp') }} dport {{ port }} accept{{ (' comment "' ~ r.comment ~ '"') if r.comment is defined else '' }}
+{% endfor %}
+{% for line in nft_input_raw %}
+        {{ line }}
+{% endfor %}
+    }
+{% for line in nft_table_raw %}
+    {{ line }}
+{% endfor %}
+}

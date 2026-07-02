@@ -1,0 +1,3 @@
+---
+- name: Apply nft rules
+  command: "nft -f /etc/nftables.d/{{ nft_table_name }}.nft"

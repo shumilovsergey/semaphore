@@ -3,6 +3,7 @@
 #---roles
 server_roles:
   - nginx_certbot
+  - nft
 
 #---vars
 
@@ -29,3 +30,10 @@ nginx_sites:
   - { name: grafana,   domain: grafana.sh-development.ru,   port: 3000, vpn_only: true }
   - { name: prometheus,   domain: prometheus.sh-development.ru,   port: 9090, vpn_only: true }
   - { name: vault,   domain: vault.sh-development.ru,   port: 9000, vpn_only: true }
+
+nft_allow_input_extra:
+  # - { port: , comment: "" }
+  - { port: 80, comment: "http" }
+  - { port: 443, comment: "https" }
+  - { port: 9100, comment: "node exporter" }
+  - { port: 9256, comment: "process exporter" }
