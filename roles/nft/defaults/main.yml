@@ -1,0 +1,44 @@
+---
+
+
+# ВАЖНО!
+# Обязательно остаемся в диапозоне  [ -199 | -101]
+nft_priority: -150
+
+# ВАЖНО!
+# работаем в своей таблице, чтобы не помешать другим серверам
+nft_table_name: "ansible_filter"
+
+
+nft_input_policy: "drop"
+
+nft_allow_icmp: true
+
+# ВАЖНО!
+# Мы используем prerouting который так же использует докер для связи между контейнерами
+# Без nft_accept_ifaces приложение и база не увидят друг друга
+nft_accept_ifaces:
+  - "docker0"
+  - "br-*"
+
+# На всякий случай
+nft_allow_dhcp: true
+
+
+# Правила:
+#   port    — required: 22 | "8000-8100" | [80, 443]
+#   proto   — optional, default tcp: tcp | udp
+#   from    — optional source (IPv4/CIDR), e.g. "10.0.0.0/8"
+#   comment — optional, shows up in `nft list ruleset`
+nft_allow_input:
+  - { port: 22, comment: "ssh" }
+
+
+# Чтобы прокинуть уникальное правило servers/..yml
+nft_allow_input_extra: []
+
+# Чтобы прокинуть сырую цепочку
+nft_input_raw: []
+
+# Чтобы прокинуть сырую таблицу
+nft_table_raw: []

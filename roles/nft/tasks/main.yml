@@ -1,0 +1,137 @@
+---
+- name: nft | check nft is installed
+  command: which nft
+  register: _nft_bin
+  changed_when: false
+  failed_when: false
+
+- name: nft | stop if nftables is not installed
+  fail:
+    msg: >-
+      nftables (nft) is not installed on {{ inventory_hostname }}.
+      This role does not install packages — install nftables manually first.
+  when: _nft_bin.rc != 0
+
+# ВАЖНО!
+# На кубер-нодах сетью владеет CNI (flannel/calico/cilium):
+# межнодовый трафик, NodePort, eBPF в обход netfilter.
+# Эта роль там всё сломает — файрволить кубер надо отдельно.
+
+
+# -------------------- Проервка есть ли кубер --------------------
+- name: nft | check for kubernetes (kubelet)
+  command: systemctl is-active kubelet
+  register: _kubelet_active
+  changed_when: false
+  failed_when: false
+
+- name: nft | check for kubernetes (k3s server)
+  command: systemctl is-active k3s
+  register: _k3s_active
+  changed_when: false
+  failed_when: false
+
+- name: nft | check for kubernetes (k3s agent)
+  command: systemctl is-active k3s-agent
+  register: _k3s_agent_active
+  changed_when: false
+  failed_when: false
+
+- name: nft | check for kubernetes (/etc/kubernetes)
+  stat:
+    path: /etc/kubernetes
+  register: _k8s_dir
+
+- name: nft | stop if this is a kubernetes node
+  fail:
+    msg: >-
+      Kubernetes detected on {{ inventory_hostname }}
+      (kubelet: {{ _kubelet_active.rc == 0 }},
+      k3s: {{ _k3s_active.rc == 0 or _k3s_agent_active.rc == 0 }},
+      /etc/kubernetes: {{ _k8s_dir.stat.exists }}).
+      This role must not manage the firewall on k8s nodes — the CNI owns
+      node networking. Remove 'nft' from server_roles for this host.
+  when: >-
+    _kubelet_active.rc == 0 or
+    _k3s_active.rc == 0 or
+    _k3s_agent_active.rc == 0 or
+    _k8s_dir.stat.exists
+
+
+# -------------------- Проервка priority --------------------
+- name: nft | validate priority (must be after conntrack -200, before docker DNAT -100)
+  fail:
+    msg: >-
+      nft_priority={{ nft_priority }} is outside the safe window -199..-101.
+      Below -200 `ct state established` stops matching (instant lockout),
+      above -100 docker-published ports bypass the firewall.
+  when: nft_priority | int <= -200 or nft_priority | int >= -100
+
+# -------------------- Проервка правил --------------------
+- name: nft | validate rules (every rule needs a port)
+  fail:
+    msg: "nft rule without 'port': {{ item }}"
+  when: item.port is not defined
+  loop: "{{ nft_allow_input + nft_allow_input_extra }}"
+
+- name: nft | create /etc/nftables.d
+  file:
+    path: /etc/nftables.d
+    state: directory
+    mode: "0755"
+
+- name: nft | deploy rules ({{ nft_table_name }})
+  template:
+    src: filter.nft.j2
+    dest: "/etc/nftables.d/{{ nft_table_name }}.nft"
+    mode: "0644"
+    validate: "nft -c -f %s"
+  notify: Apply nft rules
+
+- name: nft | include /etc/nftables.d on boot
+  lineinfile:
+    path: /etc/nftables.conf
+    line: 'include "/etc/nftables.d/*.nft"'
+    create: true
+    mode: "0755"
+
+# ВАЖНО!
+# Нельзя делать рестарт nftables - это сотрет правила докера или кубера 
+# Потребуется тогда перезагружать их тоже
+
+- name: nft | enable nftables service (rules on boot)
+  systemd:
+    name: nftables
+    enabled: true
+
+# -------------------- Отключение UFW --------------------
+# ВАЖНО!
+# Хендлер обычно применяет правила в самом конце плея — то есть ПОСЛЕ
+# этих тасок. flush_handlers применяет их прямо сейчас: ufw выключается
+# только когда nft-правила уже реально работают. Если nft -f упадёт —
+# плей остановится и ufw останется нетронутым.
+- name: nft | apply nft rules now (before touching ufw)
+  meta: flush_handlers
+
+- name: nft | check ufw
+  command: which ufw
+  register: _ufw_bin
+  changed_when: false
+  failed_when: false
+
+- name: nft | check ufw status
+  command: ufw status
+  register: _ufw_status
+  changed_when: false
+  when: _ufw_bin.rc == 0
+
+- name: nft | disable ufw (nft rules are already active)
+  command: ufw disable
+  when: _ufw_bin.rc == 0 and _ufw_status.stdout is search('Status: active')
+
+- name: nft | stop and disable ufw service
+  systemd:
+    name: ufw
+    state: stopped
+    enabled: false
+  when: _ufw_bin.rc == 0 and _ufw_status.stdout is search('Status: active')
