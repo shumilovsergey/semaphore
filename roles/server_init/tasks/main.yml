@@ -1,0 +1,106 @@
+---
+# -------------------- Swap --------------------
+# Если на сервере уже есть ЛЮБОЙ swap (некоторые VPS приходят со своим) —
+# весь блок пропускается, второй swap не создаётся.
+- name: init | swap - setup {{ server_init_swap_size }}
+  when: ansible_swaptotal_mb | int == 0
+  block:
+    - name: init | swap - create file
+      command: "fallocate -l {{ server_init_swap_size }} {{ server_init_swap_file }}"
+      args:
+        creates: "{{ server_init_swap_file }}"
+      register: _swap_file
+
+    - name: init | swap - permissions 0600
+      file:
+        path: "{{ server_init_swap_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: init | swap - mkswap
+      command: "mkswap {{ server_init_swap_file }}"
+      when: _swap_file is changed
+
+    - name: init | swap - enable now
+      command: "swapon {{ server_init_swap_file }}"
+
+    - name: init | swap - persist in fstab
+      lineinfile:
+        path: /etc/fstab
+        line: "{{ server_init_swap_file }} none swap sw 0 0"
+
+# -------------------- SSH: только по ключам --------------------
+- name: init | ssh - find authorized_keys
+  find:
+    paths:
+      - /root/.ssh
+      - /home
+    patterns: authorized_keys
+    recurse: true
+    hidden: true
+  register: _auth_keys
+
+- name: init | ssh - stop if no keys on server (lockout protection)
+  fail:
+    msg: >-
+      No authorized_keys found on {{ inventory_hostname }} —
+      disabling password auth would lock everyone out.
+      Run tools/ansible-client-init.sh first.
+  when: _auth_keys.matched == 0
+
+- name: init | ssh - check /etc/ssh/sshd_config.d exists
+  stat:
+    path: /etc/ssh/sshd_config.d
+  register: _sshd_confd
+
+# ВАЖНО!
+# sshd читает конфиг по принципу «первое значение побеждает», а Include
+# sshd_config.d/*.conf стоит В НАЧАЛЕ sshd_config. Файлы читаются по
+# алфавиту: наш 00-* обгоняет 50-cloud-init.conf с его
+# "PasswordAuthentication yes" — поэтому cloud-init нам не мешает.
+- name: init | ssh - deploy 00-ansible-init.conf (wins over cloud-init)
+  copy:
+    dest: /etc/ssh/sshd_config.d/00-ansible-init.conf
+    content: |
+      # Managed by Ansible (role: server_init). Do not edit.
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+      PermitRootLogin {{ server_init_permit_root }}
+    mode: "0644"
+  when: _sshd_confd.stat.exists
+  notify: Reload sshd
+
+# Старые образы без sshd_config.d — правим главный конфиг напрямую
+- name: init | ssh - no drop-in dir, edit sshd_config directly
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?\s*{{ item.key }}\b'
+    line: "{{ item.key }} {{ item.value }}"
+  loop:
+    - { key: "PasswordAuthentication", value: "no" }
+    - { key: "KbdInteractiveAuthentication", value: "no" }
+    - { key: "PubkeyAuthentication", value: "yes" }
+    - { key: "PermitRootLogin", value: "{{ server_init_permit_root }}" }
+  when: not _sshd_confd.stat.exists
+  notify: Reload sshd
+
+- name: init | ssh - check cloud-init dir
+  stat:
+    path: /etc/cloud/cloud.cfg.d
+  register: _cloud_dir
+
+# Чтобы cloud-init при пересоздании своих конфигов снова не включил пароли
+- name: init | ssh - tell cloud-init to keep password auth off
+  copy:
+    dest: /etc/cloud/cloud.cfg.d/99-ansible-ssh.cfg
+    content: "ssh_pwauth: false\n"
+    mode: "0644"
+  when: _cloud_dir.stat.exists
+
+# Если конфиг битый — плей падает ЗДЕСЬ, и хендлер Reload sshd не
+# выполняется: работающий sshd продолжает жить со старым конфигом.
+- name: init | ssh - validate sshd config
+  command: sshd -t
+  changed_when: false
