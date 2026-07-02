@@ -1,0 +1,9 @@
+---
+# -------------------- Swap --------------------
+server_init_swap_file: "/swapfile"
+server_init_swap_size: "4G"
+
+# -------------------- SSH --------------------
+# prohibit-password — рут может зайти, но только по ключу (дефолт)
+# no                — рут запрещён совсем (заходить только под ansible)
+server_init_permit_root: "prohibit-password"

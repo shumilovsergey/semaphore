@@ -1,0 +1,7 @@
+---
+# reload, не restart: активные ssh-сессии не рвутся,
+# новый конфиг применяется только к новым подключениям
+- name: Reload sshd
+  service:
+    name: "{{ 'sshd' if ansible_os_family == 'RedHat' else 'ssh' }}"
+    state: reloaded
