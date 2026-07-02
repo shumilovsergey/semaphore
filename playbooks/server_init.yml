@@ -7,3 +7,7 @@
   roles:
     - preflight
     - server_init
+
+
+# ручное тестирование ssh
+# ssh -o PreferredAuthentications=password user@host
