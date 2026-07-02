@@ -127,11 +127,11 @@
 
 - name: nft | disable ufw (nft rules are already active)
   command: ufw disable
-  when: _ufw_bin.rc == 0 and _ufw_status.stdout is search('Status: active')
+  when: "_ufw_bin.rc == 0 and _ufw_status.stdout is search('Status: active')"
 
 - name: nft | stop and disable ufw service
   systemd:
     name: ufw
     state: stopped
     enabled: false
-  when: _ufw_bin.rc == 0 and _ufw_status.stdout is search('Status: active')
+  when: "_ufw_bin.rc == 0 and _ufw_status.stdout is search('Status: active')"
