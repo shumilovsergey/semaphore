@@ -1,10 +1,34 @@
 ---
 
-- name: info | DHCP - find running DHCP client
+# Three ways a host can do DHCP, checked in order:
+#   1. standalone client process (dhclient / dhcpcd)
+#   2. systemd-networkd internal client (lease files in /run/systemd/netif/leases)
+#   3. NetworkManager internal client (DHCP4 section in nmcli device show)
+
+- name: info | DHCP - find running DHCP client process
   shell: ps -eo args= | awk '$1 ~ /(^|\/)(dhclient|dhcpcd)$/ {print; exit}'
   register: _dhcp_proc
   changed_when: false
   failed_when: false
+
+- name: info | DHCP - check systemd-networkd lease
+  shell: ls -1 /run/systemd/netif/leases/ 2>/dev/null | head -1
+  register: _nd_idx
+  changed_when: false
+  failed_when: false
+  when: _dhcp_proc.stdout | length == 0
+
+- name: info | DHCP - check NetworkManager internal DHCP
+  shell: >-
+    nmcli -t device show 2>/dev/null | awk -F: '/^GENERAL.DEVICE/{d=$2} /^DHCP4/{print d; exit}'
+  register: _nm_dev
+  changed_when: false
+  failed_when: false
+  when:
+    - _dhcp_proc.stdout | length == 0
+    - _nd_idx.stdout | default('') | length == 0
+
+# --- path 1: dhclient/dhcpcd lease details ---
 
 - name: info | DHCP - get DHCP server from lease
   shell: grep 'dhcp-server-identifier' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*identifier //; s/;//'
@@ -40,16 +64,91 @@
   register: _dhcp_hook
   when: _dhcp_proc.stdout | length > 0
 
+# --- path 2: systemd-networkd lease details (lease file is named by ifindex) ---
+
+- name: info | DHCP - networkd lease interface
+  shell: >-
+    ip -o link show | awk -F': ' -v i="{{ _nd_idx.stdout | default('') }}" '$1==i{print $2; exit}'
+  register: _nd_iface
+  changed_when: false
+  failed_when: false
+  when: _nd_idx.stdout | default('') | length > 0
+
+- name: info | DHCP - networkd lease DHCP server
+  shell: grep '^SERVER_ADDRESS=' /run/systemd/netif/leases/{{ _nd_idx.stdout }} 2>/dev/null | cut -d= -f2
+  register: _nd_server
+  changed_when: false
+  failed_when: false
+  when: _nd_idx.stdout | default('') | length > 0
+
+- name: info | DHCP - networkd lease DNS
+  shell: grep '^DNS=' /run/systemd/netif/leases/{{ _nd_idx.stdout }} 2>/dev/null | cut -d= -f2
+  register: _nd_dns
+  changed_when: false
+  failed_when: false
+  when: _nd_idx.stdout | default('') | length > 0
+
+- name: info | DHCP - networkd lease search domain
+  shell: grep '^DOMAINNAME=' /run/systemd/netif/leases/{{ _nd_idx.stdout }} 2>/dev/null | cut -d= -f2
+  register: _nd_domain
+  changed_when: false
+  failed_when: false
+  when: _nd_idx.stdout | default('') | length > 0
+
+- name: info | DHCP - networkd lease timing
+  shell: grep -E '^(T1|LIFETIME)=' /run/systemd/netif/leases/{{ _nd_idx.stdout }} 2>/dev/null | paste -sd' ' -
+  register: _nd_renew
+  changed_when: false
+  failed_when: false
+  when: _nd_idx.stdout | default('') | length > 0
+
+# --- path 3: NetworkManager DHCP4 details ---
+
+- name: info | DHCP - NM lease DHCP server
+  shell: nmcli -t device show {{ _nm_dev.stdout }} 2>/dev/null | sed -n 's/^DHCP4.OPTION.*dhcp_server_identifier = //p' | head -1
+  register: _nm_server
+  changed_when: false
+  failed_when: false
+  when: _nm_dev.stdout | default('') | length > 0
+
+- name: info | DHCP - NM lease DNS
+  shell: nmcli -t device show {{ _nm_dev.stdout }} 2>/dev/null | sed -n 's/^DHCP4.OPTION.*domain_name_servers = //p' | head -1
+  register: _nm_dns
+  changed_when: false
+  failed_when: false
+  when: _nm_dev.stdout | default('') | length > 0
+
+- name: info | DHCP - NM lease search domain
+  shell: nmcli -t device show {{ _nm_dev.stdout }} 2>/dev/null | sed -n 's/^DHCP4.OPTION.*domain_name = //p' | head -1
+  register: _nm_domain
+  changed_when: false
+  failed_when: false
+  when: _nm_dev.stdout | default('') | length > 0
+
+- name: info | DHCP - NM lease expiry
+  shell: |
+    e=$(nmcli -t device show {{ _nm_dev.stdout }} 2>/dev/null | sed -n 's/^DHCP4.OPTION.*expiry = //p' | head -1)
+    [ -n "$e" ] && date -d "@$e" '+%Y/%m/%d %H:%M:%S'
+  register: _nm_renew
+  changed_when: false
+  failed_when: false
+  when: _nm_dev.stdout | default('') | length > 0
+
 - name: info | collect DHCP
   set_fact:
     info_dhcp_client: >-
-      {% if _dhcp_proc.stdout | length > 0 %}{{ _dhcp_proc.stdout.split() | first | basename }}{% else %}none{% endif %}
+      {% if _dhcp_proc.stdout | length > 0 %}{{ _dhcp_proc.stdout.split() | first | basename }}
+      {%- elif _nd_idx.stdout | default('') | length > 0 %}systemd-networkd
+      {%- elif _nm_dev.stdout | default('') | length > 0 %}NetworkManager
+      {%- else %}none{% endif %}
     info_dhcp_iface: >-
-      {% if _dhcp_proc.stdout | length > 0 %}{{ _dhcp_proc.stdout.split() | last }}{% endif %}
-    info_dhcp_server: "{{ _dhcp_server.stdout | default('') }}"
-    info_dhcp_dns: "{{ _dhcp_dns.stdout | default('') }}"
-    info_dhcp_domain: "{{ _dhcp_domain.stdout | default('') }}"
-    info_dhcp_renew: "{{ _dhcp_renew.stdout | default('') }}"
+      {% if _dhcp_proc.stdout | length > 0 %}{{ _dhcp_proc.stdout.split() | last }}
+      {%- elif _nd_idx.stdout | default('') | length > 0 %}{{ _nd_iface.stdout | default('') }}
+      {%- else %}{{ _nm_dev.stdout | default('') }}{% endif %}
+    info_dhcp_server: "{{ _dhcp_server.stdout | default(_nd_server.stdout | default(_nm_server.stdout | default(''))) }}"
+    info_dhcp_dns: "{{ _dhcp_dns.stdout | default(_nd_dns.stdout | default(_nm_dns.stdout | default(''))) }}"
+    info_dhcp_domain: "{{ _dhcp_domain.stdout | default(_nd_domain.stdout | default(_nm_domain.stdout | default(''))) }}"
+    info_dhcp_renew: "{{ _dhcp_renew.stdout | default(_nd_renew.stdout | default(_nm_renew.stdout | default(''))) }}"
     info_dhcp_resolv: >-
       {% if _dhcp_proc.stdout | length == 0 %}{% elif _dhcp_hook.stat.exists | default(false) %}protected (nodnsupdate hook){% else %}rewritten on renewal{% endif %}
 
@@ -62,5 +161,5 @@
       dhcp-server={{ info_dhcp_server | trim }} |
       dns={{ info_dhcp_dns | trim }} |
       domain={{ info_dhcp_domain | trim }} |
-      renew={{ info_dhcp_renew | trim }} |
-      resolv.conf={{ info_dhcp_resolv | trim }}{% endif %}
+      renew={{ info_dhcp_renew | trim }}
+      {%- if info_dhcp_resolv | trim | length > 0 %} | resolv.conf={{ info_dhcp_resolv | trim }}{% endif %}{% endif %}
