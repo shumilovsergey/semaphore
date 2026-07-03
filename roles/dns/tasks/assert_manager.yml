@@ -1,6 +1,4 @@
 ---
-# Detects the actual DNS manager on the host and fails if it does not
-# match dns_manager. Runs before any changes are written.
 
 - name: Stat /etc/resolv.conf
   stat:
