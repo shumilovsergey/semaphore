@@ -1,0 +1,3 @@
+apt_proxy_url: "http://apt-proxy.domain.ru:3142"
+apt_proxy_https: "DIRECT"    # apt-cacher-ng не кэширует https, поэтому мимо прокси
+apt_proxy_conf_path: "/etc/apt/apt.conf.d/02proxy"

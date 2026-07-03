@@ -1,0 +1,3 @@
+// Managed by Ansible (role: apt_proxy). Manual edits will be overwritten.
+Acquire::http::Proxy "{{ apt_proxy_url }}";
+Acquire::https::Proxy "{{ apt_proxy_https }}";
