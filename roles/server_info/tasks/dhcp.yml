@@ -1,0 +1,66 @@
+---
+
+- name: info | DHCP - find running DHCP client
+  shell: ps -eo args= | awk '$1 ~ /(^|\/)(dhclient|dhcpcd)$/ {print; exit}'
+  register: _dhcp_proc
+  changed_when: false
+  failed_when: false
+
+- name: info | DHCP - get DHCP server from lease
+  shell: grep 'dhcp-server-identifier' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*identifier //; s/;//'
+  register: _dhcp_server
+  changed_when: false
+  failed_when: false
+  when: _dhcp_proc.stdout | length > 0
+
+- name: info | DHCP - get DNS servers from lease
+  shell: grep 'option domain-name-servers' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*servers //; s/;//'
+  register: _dhcp_dns
+  changed_when: false
+  failed_when: false
+  when: _dhcp_proc.stdout | length > 0
+
+- name: info | DHCP - get search domain from lease
+  shell: grep 'option domain-name ' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*domain-name //; s/[";]//g'
+  register: _dhcp_domain
+  changed_when: false
+  failed_when: false
+  when: _dhcp_proc.stdout | length > 0
+
+- name: info | DHCP - get next renewal time from lease
+  shell: grep -E '^ *renew ' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed -E 's/^ *renew [0-9] //; s/;//'
+  register: _dhcp_renew
+  changed_when: false
+  failed_when: false
+  when: _dhcp_proc.stdout | length > 0
+
+- name: info | DHCP - check for nodnsupdate hook
+  stat:
+    path: /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
+  register: _dhcp_hook
+  when: _dhcp_proc.stdout | length > 0
+
+- name: info | collect DHCP
+  set_fact:
+    info_dhcp_client: >-
+      {% if _dhcp_proc.stdout | length > 0 %}{{ _dhcp_proc.stdout.split() | first | basename }}{% else %}none{% endif %}
+    info_dhcp_iface: >-
+      {% if _dhcp_proc.stdout | length > 0 %}{{ _dhcp_proc.stdout.split() | last }}{% endif %}
+    info_dhcp_server: "{{ _dhcp_server.stdout | default('') }}"
+    info_dhcp_dns: "{{ _dhcp_dns.stdout | default('') }}"
+    info_dhcp_domain: "{{ _dhcp_domain.stdout | default('') }}"
+    info_dhcp_renew: "{{ _dhcp_renew.stdout | default('') }}"
+    info_dhcp_resolv: >-
+      {% if _dhcp_proc.stdout | length == 0 %}{% elif _dhcp_hook.stat.exists | default(false) %}protected (nodnsupdate hook){% else %}rewritten on renewal{% endif %}
+
+- name: info | output DHCP
+  debug:
+    msg: >-
+      {{ inventory_hostname }}:
+      {% if info_dhcp_client | trim == 'none' %}no DHCP client — static network config{% else
+      %}{{ info_dhcp_client | trim }} on {{ info_dhcp_iface | trim }} |
+      dhcp-server={{ info_dhcp_server | trim }} |
+      dns={{ info_dhcp_dns | trim }} |
+      domain={{ info_dhcp_domain | trim }} |
+      renew={{ info_dhcp_renew | trim }} |
+      resolv.conf={{ info_dhcp_resolv | trim }}{% endif %}

@@ -1,6 +1,4 @@
 ---
-# Drop-in file — survives package upgrades, easy to audit, idempotent.
-# Main config (/etc/systemd/resolved.conf) is left untouched.
 
 - name: Create resolved.conf.d directory
   file:

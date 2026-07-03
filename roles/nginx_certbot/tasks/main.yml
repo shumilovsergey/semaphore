@@ -1,5 +1,5 @@
 ---
-# nginx и certbot должны быть уже установлены на хосте (см. README роли).
+# nginx и certbot должны быть уже установлены на хосте
 
 - name: Ensure nginx and certbot are available
   ansible.builtin.shell: "command -v {{ item }}"

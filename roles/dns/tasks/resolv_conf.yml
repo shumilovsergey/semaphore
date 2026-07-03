@@ -1,7 +1,4 @@
 ---
-# Direct /etc/resolv.conf write — no manager daemon in the way.
-# Risk: DHCP client may overwrite on network restart. Protect with
-# chattr +i after this task if that is a concern on the target host.
 
 - name: Write /etc/resolv.conf
   copy:
