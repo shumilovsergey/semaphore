@@ -1,6 +1,5 @@
 # Роль имеет смысл только на apt-системах (Debian / Ubuntu / Astra).
-# Проверяем пакетный менеджер, а не список дистрибутивов — так не нужно
-# дополнять список при появлении нового деривата.
+
 - name: Fail if host does not use apt
   assert:
     that: ansible_facts['pkg_mgr'] == 'apt'
