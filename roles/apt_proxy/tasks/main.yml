@@ -1,0 +1,19 @@
+# Роль имеет смысл только на apt-системах (Debian / Ubuntu / Astra).
+# Проверяем пакетный менеджер, а не список дистрибутивов — так не нужно
+# дополнять список при появлении нового деривата.
+- name: Fail if host does not use apt
+  assert:
+    that: ansible_facts['pkg_mgr'] == 'apt'
+    fail_msg: >-
+      apt_proxy is for apt-based systems only, but {{ inventory_hostname }}
+      runs {{ ansible_facts['distribution'] }} (pkg_mgr={{ ansible_facts['pkg_mgr'] }}).
+      Remove apt_proxy from servers/{{ inventory_hostname }}.yml.
+    success_msg: "apt detected ({{ ansible_facts['distribution'] }})"
+
+- name: Deploy apt proxy config
+  template:
+    src: proxy.conf.j2
+    dest: "{{ apt_proxy_conf_path }}"
+    owner: root
+    group: root
+    mode: "0644"
