@@ -104,6 +104,13 @@
           command: sqlite3 {{ db_path }} ".backup {{ db_path }}.backup"
           when: service_file.stat.exists and db_file.stat.exists
 
+        - name: Backup existing service file
+          copy:
+            src: "{{ service_file_path }}"
+            dest: "{{ app_path }}/{{ app_name }}.service.backup"
+            remote_src: yes
+          when: service_file.stat.exists
+
         # ── Загрузка бинарника ───────────────────────────────────────────────
 
         - name: Download binary
@@ -113,18 +120,20 @@
             mode: "0755"
             force: yes
 
-        # ── Первый запуск: создание и старт сервиса ──────────────────────────
+        # ── Сервис-файл: всегда рендерим, перезагружаем демон при изменении ──
 
         - name: Deploy systemd service file
           template:
             src: templates/system.service.j2
             dest: "{{ service_file_path }}"
-          when: not service_file.stat.exists
+          register: service_file_deploy
 
         - name: Reload systemd daemon
           systemd:
             daemon_reload: yes
-          when: not service_file.stat.exists
+          when: service_file_deploy.changed
+
+        # ── Первый запуск: включение и старт сервиса ─────────────────────────
 
         - name: Enable and start service (first run)
           systemd:
@@ -172,6 +181,18 @@
                 src: "{{ app_path }}/{{ app_name }}.backup"
                 dest: "{{ bin_path }}"
                 remote_src: yes
+              when: service_file.stat.exists
+
+            - name: Rollback - restore service file from backup
+              copy:
+                src: "{{ app_path }}/{{ app_name }}.service.backup"
+                dest: "{{ service_file_path }}"
+                remote_src: yes
+              when: service_file.stat.exists
+
+            - name: Rollback - reload systemd daemon
+              systemd:
+                daemon_reload: yes
               when: service_file.stat.exists
 
             - name: Rollback - restart service with previous binary
