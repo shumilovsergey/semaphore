@@ -57,6 +57,19 @@
       when: ansible_host == app_config.HOST
       block:
 
+        # ── Что именно деплоим ───────────────────────────────────────────────
+
+        # Секреты (APP_TOKEN, SECRET_KEY) не печатаем — лог задачи в Semaphore
+        # хранится и виден всем, у кого есть доступ к проекту.
+        - name: Show selected app
+          debug:
+            msg:
+              - "=== deploy: {{ app_name }} ==="
+              - "host:    {{ inventory_hostname }} ({{ app_config.HOST }})"
+              - "port:    {{ app_config.env.PORT | default('-') }}"
+              - "bin_url: {{ app_config.BIN_URL | default('-') }}"
+              - "app_url: {{ app_config.env.APP_URL | default('-') }}"
+
         # ── Проверки ──────────────────────────────────────────────────────────
 
         - name: Fail if PORT is not defined
