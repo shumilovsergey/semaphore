@@ -9,5 +9,3 @@ server_roles:
 certbot_email: wumilovsergey@gmail.com
 
 nginx_sites:
-  # public
-  # - { name: bite,   domain: nom-nom.sh-development.ru,   port: 9000, vpn_only: false }
