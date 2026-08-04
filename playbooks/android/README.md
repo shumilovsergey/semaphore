@@ -45,6 +45,8 @@ seeker ansible_host=10.10.20.14 ansible_port=8022
 ansible_user=u0_a226
 ansible_python_interpreter=/data/data/com.termux/files/usr/bin/python
 ansible_shell_executable=/data/data/com.termux/files/usr/bin/bash
+ansible_remote_tmp=/data/data/com.termux/files/home/.ansible/tmp
+ansible_async_dir=/data/data/com.termux/files/home/.ansible_async
 ansible_become=false
 ```
 
@@ -54,6 +56,12 @@ ansible_become=false
 - отдельная группа `[android]` — чтобы телефон не попал под `run.yml` с
   `target: home`. Там `become: true` и `preflight`, который сверяет
   `ansible_hostname` с именем в inventory: на Termux это сразу падает.
+- `ansible_remote_tmp` и `ansible_async_dir` — абсолютными. В Termux нет записи
+  в passwd для `u0_aXXX`, а Ansible разворачивает `~` не сам, а через remote
+  `echo ~u0_a226`. Bash не резолвит имя и отдаёт строку как есть, после чего
+  Ansible принимает `~u0_a226` за настоящий путь. `async` от этого ломается с
+  `could not find job`. В `playbooks/android/*.yml` эти переменные тоже
+  проставлены — inventory живёт вне git и может протухнуть.
 
 **`u0_a226` — это uid, который Android выдал приложению при установке.**
 Переустановишь Termux — номер сменится, и inventory молча протухнет.
