@@ -1,0 +1,182 @@
+---
+
+# Дома новы, но предрассудки стары.
+# Порадуйтесь, не истребят
+# Ни годы их, ни моды, ни пожары.
+
+
+# Зеркалирование GitHub-репозиториев на Android-телефон.
+#
+# Два режима, выбираются сами:
+#
+#   1. Ничего не передали — плейбук спрашивает у GitHub API все публичные
+#      репозитории github_clone_owner и зеркалит их. Список поддерживать не надо,
+#      удалённый на GitHub репозиторий просто исчезает из выдачи.
+#
+#   2. Передали github_clone_targets — зеркалим ровно его, API не трогаем.
+#
+# ----- ШАБЛОН Semaphore extra ENV JSON
+#
+# {
+#   "github_clone_targets": [
+#     "https://github.com/you/repo1.git",
+#     "git@github.com:you/repo2.git"
+#   ]
+# }
+
+
+- name: Mirror GitHub repositories (Termux)
+  hosts: seeker
+  gather_facts: false
+  become: false
+
+  vars:
+    termux_prefix: /data/data/com.termux/files/usr
+    termux_home: /data/data/com.termux/files/home
+    backup_dir: "{{ termux_home }}/backup/github-cloner"
+
+    # Android усыпляет Termux вместе со всеми процессами — соединение при этом
+    # остаётся открытым, и Ansible висит на нём вечно. Wake lock это лечит.
+    termux_wake_lock: true
+
+    # потолок времени на ОДИН репозиторий, сек
+    clone_timeout: 1800
+
+    # чей аккаунт зеркалим, когда github_clone_targets не передан
+    github_clone_owner: shumilovsergey
+    github_clone_include_forks: false
+    # по 100 репозиториев на страницу; 3 страницы это потолок в 300
+    github_clone_max_pages: 3
+
+  pre_tasks:
+    - name: Check Termux binaries
+      ansible.builtin.stat:
+        path: "{{ termux_prefix }}/bin/{{ item }}"
+      register: termux_bins
+      loop:
+        - pkg
+        - git
+      loop_control:
+        label: "{{ item }}"
+
+    # Ловит сразу два случая: подключились не в Termux (например, в proot-Debian
+    # на другом порту) и Termux без нужных пакетов.
+    - name: Host is Termux and has git
+      ansible.builtin.assert:
+        that: termux_bins.results | rejectattr('stat.exists') | list | length == 0
+        fail_msg: >
+          Не найдено: {{ termux_bins.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}.
+          Если это не Termux — проверь ansible_host/ansible_port в inventory.
+          Если Termux — поставь пакеты: pkg install git openssh
+        success_msg: "Termux найден: {{ termux_prefix }}"
+
+    - name: Backup directory is not on shared storage
+      ansible.builtin.assert:
+        that: backup_dir is not match('^/(sdcard|storage)/')
+        fail_msg: >
+          backup_dir={{ backup_dir }} лежит на общем хранилище Android.
+          Это FUSE без симлинков и прав — git-репозиторий там побьётся.
+          Держи зеркала во внутренней памяти Termux ({{ termux_home }}).
+        success_msg: "backup_dir на внутренней ФС: {{ backup_dir }}"
+
+    # Анонимный запрос: у публичных репозиториев токен не нужен.
+    # Лимит GitHub без авторизации — 60 запросов в час на IP, тут уходит 3.
+    - name: Ask GitHub API for repositories
+      ansible.builtin.uri:
+        url: >-
+          https://api.github.com/users/{{ github_clone_owner }}/repos?type=owner&sort=full_name&per_page=100&page={{ item }}
+        return_content: true
+      register: github_api
+      loop: "{{ range(1, (github_clone_max_pages | int) + 1) | list }}"
+      loop_control:
+        label: "page {{ item }}"
+      when: github_clone_targets is not defined
+
+    - name: Build repository list from API response
+      ansible.builtin.set_fact:
+        github_discovered: >-
+          {{ github_api.results | map(attribute='json') | flatten
+             | rejectattr('fork') | map(attribute='clone_url') | list
+             if not (github_clone_include_forks | bool)
+             else github_api.results | map(attribute='json') | flatten
+                  | map(attribute='clone_url') | list }}
+      when: github_clone_targets is not defined
+
+    # Отдельная переменная, а не github_clone_targets: extra vars в Semaphore
+    # имеют высший приоритет, set_fact их всё равно не перебьёт.
+    - name: Resolve final repository list
+      ansible.builtin.set_fact:
+        github_clone_repos: "{{ github_clone_targets | default(github_discovered | default([], true), true) }}"
+
+    - name: Repository list is not empty
+      ansible.builtin.assert:
+        that:
+          - github_clone_repos is iterable
+          - github_clone_repos is not string
+          - github_clone_repos | length > 0
+        fail_msg: >
+          Список репозиториев пуст. Либо задай github_clone_targets в Extra Variables,
+          либо проверь github_clone_owner={{ github_clone_owner }} — у него должны быть
+          публичные репозитории.
+        success_msg: "Репозиториев в очереди: {{ github_clone_repos | length }}"
+
+  tasks:
+    - name: Acquire Termux wake lock
+      ansible.builtin.command: "{{ termux_prefix }}/bin/termux-wake-lock"
+      changed_when: false
+      when: termux_wake_lock | bool
+
+    - name: Mirror repositories
+      block:
+        - name: Ensure backup directory exists
+          ansible.builtin.file:
+            path: "{{ backup_dir }}"
+            state: directory
+            mode: "0700"
+
+        - name: Mirror or update each repository
+          ansible.builtin.shell:
+            executable: "{{ termux_prefix }}/bin/bash"
+            cmd: |
+              set -eu
+              repo_name=$(basename "{{ item }}" .git)
+              target="{{ backup_dir }}/${repo_name}.git"
+              refs() { git -C "$target" for-each-ref --format='%(objectname) %(refname)' | sha256sum; }
+
+              if [ -d "$target" ]; then
+                before=$(refs)
+                git -C "$target" remote update --prune
+                if [ "$before" = "$(refs)" ]; then echo "STATUS=unchanged"; else echo "STATUS=updated"; fi
+              else
+                git clone --mirror "{{ item }}" "$target"
+                echo "STATUS=cloned"
+              fi
+          environment:
+            # Без этого git без ключа/кредов уходит в приглашение ввода и висит
+            # вечно: у Ansible нет tty, отвечать некому. Пусть падает сразу.
+            GIT_TERMINAL_PROMPT: "0"
+            GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+          loop: "{{ github_clone_repos }}"
+          loop_control:
+            label: "{{ item }}"
+          register: clone_result
+          changed_when: "'STATUS=unchanged' not in clone_result.stdout"
+          # async снимает главную беду прошлой версии: задача больше не держит
+          # одно ssh-соединение открытым весь клон и не висит бесконечно
+          async: "{{ clone_timeout }}"
+          poll: 15
+
+        - name: Show result for each repository
+          ansible.builtin.debug:
+            msg: >-
+              {{ item.item }} —
+              {{ item.stdout_lines | select('match', '^STATUS=') | first | default('STATUS=?') | replace('STATUS=', '') }}
+          loop: "{{ clone_result.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+      always:
+        - name: Release Termux wake lock
+          ansible.builtin.command: "{{ termux_prefix }}/bin/termux-wake-unlock"
+          changed_when: false
+          when: termux_wake_lock | bool

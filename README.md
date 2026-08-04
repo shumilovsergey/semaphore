@@ -9,8 +9,8 @@ ansible.cfg             — конфигурация
 run.yml                 — главный плейбук: разворачивает servers/<hostname>.yml по target
 
 playbooks/              — уникальные задачи под конкретные ситуации
+  android/              — телефон под бэкапы, цель Termux напрямую
   web_apps/
-  github_clone.yml
 
 roles/                  — переиспользуемые рецепты (не знают про конкретные серверы)
   0_role_template/      — шаблон для новой роли (скопируй и переименуй)
@@ -49,6 +49,8 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 - [Подробнее про роли](./roles/README.md)
 
 - [Подробнее про сервера](./servers/README.md)
+
+- [Телефон под бэкапы (Termux)](./playbooks/android/README.md)
 
 - [Подключение TOTP](./tools/totp.md)
 
