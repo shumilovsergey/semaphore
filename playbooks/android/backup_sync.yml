@@ -21,8 +21,7 @@
     termux_prefix: /data/data/com.termux/files/usr
     termux_home: /data/data/com.termux/files/home
 
-    ansible_remote_tmp: "{{ termux_home }}/.ansible/tmp"
-    ansible_async_dir: "{{ termux_home }}/.ansible_async"
+
 
     termux_wake_lock: true
 
@@ -37,8 +36,8 @@
     # сколько успешных поколений держим на каждый сервер
     backup_generations: 3
 
-    # потолок времени на ОДИН rsync, сек
-    backup_timeout: 3600
+
+    backup_io_timeout: 60
 
     backup_rsync_path: "sudo rsync"
 
@@ -183,3 +182,4 @@
           ansible.builtin.command: "{{ termux_prefix }}/bin/termux-wake-unlock"
           changed_when: false
           when: termux_wake_lock | bool
+
