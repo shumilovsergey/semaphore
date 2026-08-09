@@ -1,0 +1,47 @@
+{% set t_type = (item.type | default(autossh_default_type)) | upper %}
+{% set t_bind = item.bind | default(autossh_default_bind) %}
+{% set t_dest_host = item.dest_host | default(autossh_default_dest_host) %}
+{% set t_dest_port = item.dest_port | default(item.listen_port) %}
+{% set t_user = item.user | default(autossh_user) %}
+{% set t_ssh_user = item.ssh_user | default(autossh_ssh_user) %}
+{% set t_ssh_key = item.ssh_key | default(autossh_ssh_key) %}
+{{ autossh_marker }}
+# {{ ansible_managed }} — роль autossh, правки руками затрутся
+# по этой метке роль находит свои юниты, не трогай первую строку
+# {{ autossh_unit_dir }}/{{ item.name }}.service
+
+[Unit]
+Description={{ item.description | default('AutoSSH ' ~ t_type ~ ' tunnel ' ~ t_bind ~ ':' ~ item.listen_port ~ ' -> ' ~ t_dest_host ~ ':' ~ t_dest_port ~ ' via ' ~ t_ssh_user ~ '@' ~ item.ssh_host) }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ t_user }}
+Environment=AUTOSSH_GATETIME=0
+
+ExecStart=/usr/bin/autossh -M 0 -N -q \
+  -i {{ t_ssh_key }} \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval={{ autossh_server_alive_interval }} \
+  -o ServerAliveCountMax={{ autossh_server_alive_count_max }} \
+  -o StrictHostKeyChecking={{ autossh_strict_host_key_checking }} \
+{% for opt in item.options | default([]) %}
+  -o {{ opt }} \
+{% endfor %}
+{% if t_type == 'L' and t_bind not in ['127.0.0.1', 'localhost', '::1'] %}
+  -g \
+{% endif %}
+  -{{ t_type }} {{ t_bind }}:{{ item.listen_port }}:{{ t_dest_host }}:{{ t_dest_port }} \
+  {{ t_ssh_user }}@{{ item.ssh_host }}
+
+Restart=always
+RestartSec={{ autossh_restart_sec }}
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

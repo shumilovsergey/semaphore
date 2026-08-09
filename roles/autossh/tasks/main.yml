@@ -1,0 +1,155 @@
+---
+# Создаёт по одному systemd-сервису autossh на каждый туннель из autossh_tunnels.
+
+- name: Tunnel names must be unique
+  ansible.builtin.assert:
+    that: >
+      autossh_tunnels | map(attribute='name') | list | unique | length
+      == autossh_tunnels | length
+    fail_msg: "В autossh_tunnels есть повторяющиеся name — unit-файлы затрут друг друга"
+  when: autossh_tunnels | length > 0
+
+- name: Validate tunnel definitions
+  ansible.builtin.assert:
+    that:
+      - item.name is defined and item.name | length > 0
+      - item.listen_port is defined
+      - item.ssh_host is defined and item.ssh_host | length > 0
+      - (item.type | default(autossh_default_type)) | upper in ['L', 'R']
+    fail_msg: >
+      Туннель описан неверно. Обязательны name, listen_port, ssh_host;
+      type может быть только L или R. Получено: {{ item }}
+  loop: "{{ autossh_tunnels }}"
+  loop_control:
+    label: "{{ item.name | default('<без имени>') }}"
+
+- name: Read local users
+  ansible.builtin.getent:
+    database: passwd
+  when: autossh_tunnels | length > 0
+
+- name: Tunnel user must exist on the host
+  ansible.builtin.assert:
+    that: (item.user | default(autossh_user)) in ansible_facts.getent_passwd
+    fail_msg: >
+      Пользователь '{{ item.user | default(autossh_user) }}' (туннель {{ item.name }})
+      не существует на хосте — от него нельзя запустить сервис
+  loop: "{{ autossh_tunnels }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Check that SSH keys exist
+  ansible.builtin.stat:
+    path: "{{ item.ssh_key | default(autossh_ssh_key) }}"
+  loop: "{{ autossh_tunnels }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: autossh_key_stat
+  changed_when: false
+
+- name: SSH key must be present
+  ansible.builtin.assert:
+    that: item.stat.exists
+    fail_msg: >
+      Нет ключа {{ item.item.ssh_key | default(autossh_ssh_key) }}
+      для туннеля {{ item.item.name }}
+  loop: "{{ autossh_key_stat.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# autossh должен быть установлен на хосте — роль его не ставит
+- name: Ensure autossh is available
+  ansible.builtin.shell: "command -v autossh"
+  register: autossh_bin_check
+  changed_when: false
+  failed_when: autossh_bin_check.rc != 0
+  when: autossh_tunnels | length > 0
+
+
+# --- уборка: туннели, которых больше нет в autossh_tunnels ---
+# идёт до раскладки юнитов, чтобы переименованный туннель освободил порт
+# до старта нового
+
+- name: Find units created by this role
+  ansible.builtin.find:
+    paths: "{{ autossh_unit_dir }}"
+    patterns: "*.service"
+    contains: "^{{ autossh_marker | regex_escape }}$"
+  register: autossh_found
+  when: autossh_prune
+
+- name: List tunnels that are no longer described
+  ansible.builtin.set_fact:
+    autossh_orphans: >-
+      {{ autossh_found.files | map(attribute='path') | map('basename')
+         | map('regex_replace', '\.service$', '') | list
+         | difference(autossh_tunnels | map(attribute='name') | list) }}
+  when: autossh_prune
+
+- name: Stop and disable removed tunnels
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ autossh_orphans | default([]) }}"
+
+- name: Remove units of removed tunnels
+  ansible.builtin.file:
+    path: "{{ autossh_unit_dir }}/{{ item }}.service"
+    state: absent
+  loop: "{{ autossh_orphans | default([]) }}"
+  register: autossh_units_removed
+
+
+# --- создание/обновление туннелей ---
+
+- name: Deploy autossh unit files
+  ansible.builtin.template:
+    src: autossh.service.j2
+    dest: "{{ autossh_unit_dir }}/{{ item.name }}.service"
+    mode: "0644"
+  loop: "{{ autossh_tunnels }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: autossh_units
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: autossh_units is changed or autossh_units_removed is changed
+
+# первый запуск -> started, изменившийся unit -> restarted, без изменений -> ничего
+- name: Enable and start tunnels
+  ansible.builtin.systemd:
+    name: "{{ item.item.name }}"
+    enabled: true
+    state: "{{ 'restarted' if item is changed else 'started' }}"
+  loop: "{{ autossh_units.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+
+# --- проверка ---
+
+- name: Verify tunnel services are active
+  ansible.builtin.command: "systemctl is-active {{ item.name }}"
+  register: autossh_is_active
+  until: autossh_is_active.rc == 0
+  retries: 5
+  delay: 3
+  changed_when: false
+  loop: "{{ autossh_tunnels }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# у обратных (R) туннелей порт открывается на удалённом хосте — локально проверить нечего
+- name: Wait for local tunnel ports
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item.listen_port }}"
+    state: started
+    timeout: 15
+  when: (item.type | default(autossh_default_type)) | upper == 'L'
+  loop: "{{ autossh_tunnels }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.listen_port }})"
