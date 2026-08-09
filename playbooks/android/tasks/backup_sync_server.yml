@@ -6,6 +6,12 @@
 # Любая ошибка ловится rescue: сервер помечается FAILED, остальные продолжают.
 # Ни одна задача до "Promote generation" не трогает уже лежащие поколения,
 # поэтому падение на любом шаге оставляет прошлые копии как были.
+#
+# async здесь намеренно нет. Он ставился как страховка от вечного зависания,
+# но /backup — это сотни килобайт и доли секунды, а async на этом хосте тащит
+# за собой Termux-пути и ломается сам (см. README папки). Зависшую передачу
+# закрывают rsync --timeout и ServerAliveInterval, и падают они с внятной
+# ошибкой, а не бесконечным ASYNC POLL.
 
 - name: "Sync {{ backup_server }}"
   block:
@@ -20,6 +26,7 @@
         srv_port: "{{ hostvars[backup_server].ansible_port | default(22) }}"
         srv_src: "{{ hostvars[backup_server].backup_src | default(backup_src) }}"
         srv_staging: "{{ backup_staging }}/{{ backup_server }}"
+        srv_dir: "{{ backup_dest }}/{{ backup_server }}"
         srv_gen: "{{ backup_dest }}/{{ backup_server }}/backup-{{ backup_stamp }}"
 
     - name: Ensure staging directory exists
@@ -39,6 +46,7 @@
           - rsync
           - -rti
           - --delete
+          - "--timeout={{ backup_io_timeout }}"
           - "--rsync-path={{ backup_rsync_path }}"
           - -e
           - "ssh -p {{ srv_port }} {{ backup_ssh_opts }}"
@@ -47,14 +55,6 @@
       delegate_to: localhost
       register: hop1
       changed_when: hop1.stdout | length > 0
-      async: "{{ backup_timeout }}"
-      poll: 15
-      vars:
-        # ansible_async_dir из play — это путь внутри Termux, а задача
-        # выполняется на Ansible-хосте: delegate_to меняет исполнителя, но
-        # переменные play остаются, и async_wrapper пошёл бы создавать
-        # /data/data/... на Ansible-хосте. Перебиваем локальным путём.
-        ansible_async_dir: "{{ backup_staging }}/.async"
 
     - name: Count files and bytes in staging
       ansible.builtin.shell:
@@ -86,30 +86,16 @@
           действительно есть и каталог не отвалился.
         success_msg: "{{ backup_server }}: {{ src_files }} файлов, {{ src_bytes | int | human_readable }}"
 
-    - name: Ensure server directory exists on the phone
-      ansible.builtin.file:
-        path: "{{ backup_dest }}/{{ backup_server }}"
-        state: directory
-
-    # Мусор от прошлых оборванных запусков. Докачивать его мы не пробуем:
-    # поколение целиком дешевле перелить, чем доказать, что недокачанное
-    # осталось консистентным.
-    - name: Drop leftover .incomplete generations
-      ansible.builtin.command:
-        argv:
-          - find
-          - "{{ backup_dest }}/{{ backup_server }}"
-          - -maxdepth
-          - "1"
-          - -type
-          - d
-          - -name
-          - "backup-*.incomplete"
-          - -exec
-          - rm
-          - -rf
-          - "{}"
-          - +
+    # Мусор от прошлых оборванных запусков. Докачивать его не пробуем: целиком
+    # перелить дешевле, чем доказать, что недокачанное осталось консистентным.
+    # mkdir -p вместо file: заодно обходит биты прав, которых на /sdcard нет.
+    - name: Prepare a clean slot on the phone
+      ansible.builtin.shell:
+        executable: "{{ termux_prefix }}/bin/bash"
+        cmd: |
+          set -eu
+          mkdir -p '{{ srv_dir }}'
+          rm -rf '{{ srv_dir }}'/backup-*.incomplete
       changed_when: false
 
     # Права на общее хранилище Android не тащим: там их просто нет, и rsync
@@ -123,6 +109,7 @@
           - --no-perms
           - --no-owner
           - --no-group
+          - "--timeout={{ backup_io_timeout }}"
           - -e
           - "ssh -p {{ phone_port }} {{ backup_ssh_opts }}"
           - "{{ srv_staging }}/"
@@ -130,11 +117,6 @@
       delegate_to: localhost
       register: hop2
       changed_when: hop2.stdout | length > 0
-      async: "{{ backup_timeout }}"
-      poll: 15
-      vars:
-        # см. комментарий у Hop 1 — задача идёт с Ansible-хоста, не с телефона
-        ansible_async_dir: "{{ backup_staging }}/.async"
 
     - name: Count files and bytes in the new generation
       ansible.builtin.shell:
@@ -164,29 +146,22 @@
           прошлые копии не тронуты.
         success_msg: "Копия сошлась: {{ src_files }} файлов, {{ src_bytes | int | human_readable }}"
 
-    # Единственный шаг, после которого поколений становится больше.
-    # Всё, что могло пойти не так, уже проверено выше.
-    - name: Promote generation
-      ansible.builtin.command:
-        argv:
-          - mv
-          - "{{ srv_gen }}.incomplete"
-          - "{{ srv_gen }}"
-
-    # Тот же приём, что в скрипте ротации на сервере: имена с датой сортируются
-    # лексикографически, значит и хронологически. .incomplete в выборку не
-    # попадает, поэтому недокачанный каталог не может вытеснить готовый.
-    - name: "Keep only the last {{ backup_generations }} generations"
+    # Единственный шаг, после которого поколений становится больше — и сразу
+    # ротация, одной задачей. Порядок тут и есть гарантия: сначала mv, потом
+    # чистка, иначе неудачный прогон вытеснил бы хорошую копию.
+    # Имена с датой сортируются лексикографически, значит и хронологически;
+    # .incomplete в выборку не попадает — тот же приём, что в скрипте на сервере.
+    - name: Promote generation and rotate
       ansible.builtin.shell:
         executable: "{{ termux_prefix }}/bin/bash"
         cmd: |
-          set -u
-          find '{{ backup_dest }}/{{ backup_server }}' -maxdepth 1 -type d \
+          set -eu
+          mv '{{ srv_gen }}.incomplete' '{{ srv_gen }}'
+          find '{{ srv_dir }}' -maxdepth 1 -type d \
               -name 'backup-*' ! -name '*.incomplete' \
             | sort -r \
             | tail -n +{{ (backup_generations | int) + 1 }} \
             | xargs -r rm -rf
-      changed_when: false
 
     - name: Record success
       ansible.builtin.set_fact:
