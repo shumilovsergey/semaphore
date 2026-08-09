@@ -1,0 +1,185 @@
+---
+#
+# Телефон не видит серверы напрямую, поэтому данные идут в два прыжка через
+# Ansible-хост:
+#
+#   сервер:/backup  ──rsync──>  staging на Ansible-хосте  ──rsync──>  телефон
+#
+# ----- ШАБЛОН Semaphore extra ENV JSON
+#
+# {
+#   "backup_servers": ["ru-vps-main", "la-vps"]
+# }
+
+
+- name: Sync server backups to Android device
+  hosts: seeker
+  gather_facts: false
+  become: false
+
+  vars:
+    termux_prefix: /data/data/com.termux/files/usr
+    termux_home: /data/data/com.termux/files/home
+
+    ansible_remote_tmp: "{{ termux_home }}/.ansible/tmp"
+    ansible_async_dir: "{{ termux_home }}/.ansible_async"
+
+    termux_wake_lock: true
+
+    # какие серверы бэкапим — список имён из inventory, задаётся в Semaphore
+    backup_servers: []
+    backup_src: /backup
+    backup_staging: /var/tmp/backup-staging
+
+    # куда кладём на телефоне
+    backup_dest: /sdcard/backup-storage
+
+    # сколько успешных поколений держим на каждый сервер
+    backup_generations: 3
+
+    # потолок времени на ОДИН rsync, сек
+    backup_timeout: 3600
+
+    backup_rsync_path: "sudo rsync"
+
+    backup_ssh_opts: >-
+      -o BatchMode=yes -o StrictHostKeyChecking=accept-new
+      -o ConnectTimeout=15 -o ServerAliveInterval=15
+
+  pre_tasks:
+    - name: Server list is not empty
+      ansible.builtin.assert:
+        that:
+          - backup_servers is iterable
+          - backup_servers is not string
+          - backup_servers | length > 0
+        fail_msg: >
+          backup_servers пуст. Задай список серверов в Extra Variables:
+          {"backup_servers": ["ru-vps-main"]}
+        success_msg: "Серверов в очереди: {{ backup_servers | length }}"
+
+    - name: All backup_servers exist in inventory
+      ansible.builtin.assert:
+        that: backup_servers | difference(hostvars.keys() | list) | length == 0
+        fail_msg: >
+          Нет в inventory: {{ backup_servers | difference(hostvars.keys() | list) | join(', ') }}.
+        success_msg: "Все серверы найдены в inventory"
+
+    - name: Check rsync on the phone
+      ansible.builtin.stat:
+        path: "{{ termux_prefix }}/bin/rsync"
+      register: termux_rsync
+
+    - name: Host is Termux and has rsync
+      ansible.builtin.assert:
+        that: termux_rsync.stat.exists
+        fail_msg: >
+          Не найден {{ termux_prefix }}/bin/rsync.
+          Если это не Termux — проверь ansible_host/ansible_port в inventory.
+          Если Termux — поставь пакет: pkg install rsync
+        success_msg: "Termux найден: {{ termux_prefix }}"
+
+    - name: Check rsync on the Ansible host
+      ansible.builtin.command: rsync --version
+      delegate_to: localhost
+      changed_when: false
+
+    # delegate_to подменяет ansible_host/ansible_user/ansible_port
+    - name: Remember phone connection details
+      ansible.builtin.set_fact:
+        phone_host: "{{ ansible_host | default(inventory_hostname) }}"
+        phone_user: "{{ ansible_user }}"
+        phone_port: "{{ ansible_port | default(22) }}"
+
+    # Один штамп на весь запуск: все серверы получают поколение с одной датой
+    - name: Take a single timestamp for the whole run
+      ansible.builtin.command: date +%Y-%m-%d_%H-%M-%S
+      delegate_to: localhost
+      changed_when: false
+      register: backup_stamp_cmd
+
+    - name: Remember the timestamp
+      ansible.builtin.set_fact:
+        backup_stamp: "{{ backup_stamp_cmd.stdout }}"
+
+    - name: Ensure destination directory exists on the phone
+      ansible.builtin.file:
+        path: "{{ backup_dest }}"
+        state: directory
+
+  tasks:
+    - name: Acquire Termux wake lock
+      ansible.builtin.command: "{{ termux_prefix }}/bin/termux-wake-lock"
+      changed_when: false
+      when: termux_wake_lock | bool
+
+    - name: Sync servers
+      block:
+        - name: Start with an empty result list
+          ansible.builtin.set_fact:
+            backup_results: []
+
+        - name: Sync each server
+          ansible.builtin.include_tasks: tasks/backup_sync_server.yml
+          loop: "{{ backup_servers }}"
+          loop_control:
+            loop_var: backup_server
+            label: "{{ backup_server }}"
+
+        # Сводка
+        - name: Collect storage stats from the phone
+          ansible.builtin.shell:
+            executable: "{{ termux_prefix }}/bin/bash"
+            cmd: |
+              set -u
+              dest='{{ backup_dest }}'
+              gens() {
+                find "$1" -maxdepth 1 -type d -name 'backup-*' ! -name '*.incomplete'
+              }
+              printf '{"free_kb":%s,"servers":{' "$(df -Pk "$dest" | awk 'NR==2 {print $4}')"
+              first=1
+              for d in "$dest"/*/; do
+                [ -d "$d" ] || continue
+                name=$(basename "$d")
+                count=$(gens "$d" | wc -l | tr -d ' ')
+                newest=$(gens "$d" | sed 's#.*/backup-##' | sort -r | head -n 1)
+                bytes=$(find "$d" -type f -exec stat -c '%s' {} + 2>/dev/null | awk '{s+=$1} END {print s+0}')
+                [ "$first" -eq 1 ] || printf ','
+                first=0
+                printf '"%s":{"gens":%s,"newest":"%s","bytes":%s}' \
+                  "$name" "${count:-0}" "${newest:-never}" "${bytes:-0}"
+              done
+              printf '}}'
+          changed_when: false
+          register: phone_stats_raw
+
+        - name: Backup storage summary
+          ansible.builtin.debug:
+            msg: "{{ report_text.split('\n') }}"
+          vars:
+            stats: "{{ phone_stats_raw.stdout | from_json }}"
+            used_bytes: "{{ stats.servers.values() | map(attribute='bytes') | sum }}"
+            report_text: |-
+              Backup storage summary:
+              {% for r in backup_results %}
+              {% set s = stats.servers.get(r.server, {}) %}
+              {{ '%-18s' | format(r.server) }} {{ '%10s' | format(s.get('bytes', 0) | human_readable) }}  {{ s.get('gens', 0) }} gens  newest {{ s.get('newest', 'never') }}  {{ r.status }}{{ ' — ' + r.msg if r.msg else '' }}
+              {% endfor %}
+
+              Phone free:            {{ (stats.free_kb | int * 1024) | human_readable }}
+              Phone used by backups: {{ used_bytes | int | human_readable }}
+
+        - name: All servers synced successfully
+          ansible.builtin.assert:
+            that: backup_results | rejectattr('status', 'eq', 'OK') | list | length == 0
+            fail_msg: >
+              Не синхронизированы:
+              {{ backup_results | rejectattr('status', 'eq', 'OK') | map(attribute='server') | join(', ') }}.
+              Прошлые поколения этих серверов на телефоне не тронуты.
+            success_msg: "Все серверы синхронизированы"
+
+      always:
+        - name: Release Termux wake lock
+          ansible.builtin.command: "{{ termux_prefix }}/bin/termux-wake-unlock"
+          changed_when: false
+          when: termux_wake_lock | bool
