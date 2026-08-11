@@ -25,11 +25,13 @@ nft_accept_ifaces:
 nft_allow_dhcp: true
 
 
-# Правила:
-#   port    — required: 22 | "8000-8100" | [80, 443]
+# Правила — допустимы ТОЛЬКО эти 4 ключа, остальные молча игнорируются
+# (нет ключа `source`/`src`/`ip`/`saddr` — опечатка откроет порт всему миру):
+#   port    — required: 22 | "22" | "8000-8100" | [80, 443, "8000-8100"]
 #   proto   — optional, default tcp: tcp | udp
-#   from    — optional source (IPv4/CIDR), e.g. "10.0.0.0/8"
+#   from    — optional (IPv4/CIDR): "172.18.0.4" | "10.0.0.0/8"
 #   comment — optional, shows up in `nft list ruleset`
+# Пример: { port: [80, 443], proto: tcp, from: "10.0.0.0/8", comment: "web" }
 nft_allow_input:
   - { port: 22, comment: "ssh" }
 
