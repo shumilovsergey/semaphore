@@ -1,0 +1,49 @@
+---
+
+# Общая identity для autossh-туннелей
+# один системный пользователь
+# одна пара ключей на весь парк серверов
+# Источник правды Ansible сервер (для будущей ротации)
+
+# ПАМЯТКА! Смена ключей ---------------------------#
+# 1. Положить руками новую пару на Ansible сервере в ~/.ssh пользователя.
+# 2. Прогнать роль по ВСЕМ серверам сразу (target: all).
+
+# ВАЖНО: в server_roles эта роль должна стоять ДО роли autossh — та падает,
+# если пользователя или ключа на хосте ещё нет.
+
+# имя пользователя
+autossh_identity_user: ansible-autossh-user
+
+# ------------------------опции---------------#
+autossh_identity_home: "/home/{{ autossh_identity_user }}"
+autossh_identity_shell: /sbin/nologin
+autossh_identity_key_name: id_ed25519
+autossh_identity_key_comment: autossh-fleet
+
+# Ограничения ключа в authorized_keys.
+#   restrict         — выключить ВСЁ (shell, pty, agent/X11-forwarding, ~/.ssh/rc)
+#   port-forwarding  — вернуть обратно только проброс портов
+#   command=/bin/false — подстраховка, если кто-то всё же откроет сессию
+# Нужен OpenSSH >= 7.2 (Debian 9+), там появился restrict.
+autossh_identity_key_options: 'restrict,port-forwarding,command="/bin/false"'
+
+autossh_identity_ssh_dir: "{{ autossh_identity_home }}/.ssh"
+autossh_identity_private_key: "{{ autossh_identity_ssh_dir }}/{{ autossh_identity_key_name }}"
+autossh_identity_public_key: "{{ autossh_identity_private_key }}.pub"
+autossh_identity_authorized_keys: "{{ autossh_identity_ssh_dir }}/authorized_keys"
+
+# ------------------------sshd на целевом хосте---------------#
+autossh_identity_manage_sshd: true
+autossh_identity_sshd_dropin: /etc/ssh/sshd_config.d/50-autossh-identity.conf
+
+# GatewayPorts для этого пользователя:
+#   no              — обратные (-R) туннели слушают только loopback удалённого хоста
+#   clientspecified — клиент может попросить bind: 0.0.0.0, то есть открыть порт наружу
+autossh_identity_gateway_ports: "clientspecified"
+
+# AllowUsers/AllowGroups внутри Match не переопределяются.
+
+# Debian/Ubuntu — ssh, RHEL — sshd
+autossh_identity_sshd_service: "{{ 'sshd' if ansible_os_family == 'RedHat' else 'ssh' }}"
+autossh_identity_sshd_bin: /usr/sbin/sshd

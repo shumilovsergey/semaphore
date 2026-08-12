@@ -1,0 +1,231 @@
+---
+
+# --- контроллер: источник правды -------------------------------------------
+
+- name: Create identity user on the Ansible server
+  ansible.builtin.user:
+    name: "{{ autossh_identity_user }}"
+    system: true
+    shell: "{{ autossh_identity_shell }}"
+    home: "{{ autossh_identity_home }}"
+    create_home: true
+    password_lock: true
+    state: present
+  delegate_to: localhost
+  run_once: true
+
+- name: Create .ssh directory on the Ansible server
+  ansible.builtin.file:
+    path: "{{ autossh_identity_ssh_dir }}"
+    state: directory
+    owner: "{{ autossh_identity_user }}"
+    group: "{{ autossh_identity_user }}"
+    mode: "0700"
+  delegate_to: localhost
+  run_once: true
+
+# Ключ НИКОГДА не перезаписывается (creates:). Чтобы сменить пару — положи
+# на контроллере новую вручную и прогони роль по всем хостам.
+- name: Generate keypair on the Ansible server if missing
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N '' -C '{{ autossh_identity_key_comment }}'
+      -f {{ autossh_identity_private_key }}
+    creates: "{{ autossh_identity_private_key }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Fix keypair ownership on the Ansible server
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ autossh_identity_user }}"
+    group: "{{ autossh_identity_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ autossh_identity_private_key }}", mode: "0600" }
+    - { path: "{{ autossh_identity_public_key }}", mode: "0644" }
+  loop_control:
+    label: "{{ item.path }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Read public key from the Ansible server
+  ansible.builtin.slurp:
+    src: "{{ autossh_identity_public_key }}"
+  register: autossh_identity_pub
+  delegate_to: localhost
+
+- name: Read private key from the Ansible server
+  ansible.builtin.slurp:
+    src: "{{ autossh_identity_private_key }}"
+  register: autossh_identity_priv
+  delegate_to: localhost
+  no_log: true
+
+# --- целевой хост ----------------------------------------------------------
+
+- name: Create identity user
+  ansible.builtin.user:
+    name: "{{ autossh_identity_user }}"
+    system: true
+    shell: "{{ autossh_identity_shell }}"
+    home: "{{ autossh_identity_home }}"
+    create_home: true
+    password_lock: true
+    state: present
+
+# Пользователь только для туннелей — sudo ему не положен ни при каких раскладах
+- name: Ensure the identity user has no sudo
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ autossh_identity_user }}"
+    state: absent
+
+- name: Create .ssh directory
+  ansible.builtin.file:
+    path: "{{ autossh_identity_ssh_dir }}"
+    state: directory
+    owner: "{{ autossh_identity_user }}"
+    group: "{{ autossh_identity_user }}"
+    mode: "0700"
+
+# Раскладывается ДО приватного ключа осознанно: при линейной стратегии Ansible
+# доводит задачу до конца на всех хостах, прежде чем начать следующую. Значит
+# новый публичный ключ окажется везде раньше, чем хоть один хост попробует
+# ходить новым приватным.
+#
+# Файл переписывается целиком: пользователь выделенный, посторонних ключей у
+# него быть не должно, и старый ключ при ротации обязан исчезнуть.
+- name: Install authorized_keys (exactly one restricted key)
+  ansible.builtin.copy:
+    content: "{{ autossh_identity_key_options }} {{ autossh_identity_pub.content | b64decode | trim }}\n"
+    dest: "{{ autossh_identity_authorized_keys }}"
+    owner: "{{ autossh_identity_user }}"
+    group: "{{ autossh_identity_user }}"
+    mode: "0600"
+
+- name: Install private key
+  ansible.builtin.copy:
+    content: "{{ autossh_identity_priv.content | b64decode }}"
+    dest: "{{ autossh_identity_private_key }}"
+    owner: "{{ autossh_identity_user }}"
+    group: "{{ autossh_identity_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Install public key
+  ansible.builtin.copy:
+    content: "{{ autossh_identity_pub.content | b64decode }}"
+    dest: "{{ autossh_identity_public_key }}"
+    owner: "{{ autossh_identity_user }}"
+    group: "{{ autossh_identity_user }}"
+    mode: "0644"
+
+# --- sshd на целевом хосте: разрешить проброс портов этому пользователю -----
+#
+# Основной sshd_config роль не переписывает — кладёт drop-in в
+# /etc/ssh/sshd_config.d/ и разрешает всё только внутри Match User.
+# Весь блок обёрнут в block/rescue: любая ошибка откатывается ДО перезагрузки
+# sshd, чтобы не остаться без доступа к серверу.
+
+- name: Configure sshd for the identity user
+  when: autossh_identity_manage_sshd | bool
+  block:
+
+    - name: Read effective sshd config
+      ansible.builtin.command: "{{ autossh_identity_sshd_bin }} -T"
+      register: autossh_identity_sshd_effective
+      changed_when: false
+
+    - name: Extract sshd login allowlists
+      ansible.builtin.set_fact:
+        autossh_identity_allowusers: >-
+          {{ autossh_identity_sshd_effective.stdout_lines
+             | select('match', '^allowusers ') | list | first | default('') }}
+        autossh_identity_allowgroups: >-
+          {{ autossh_identity_sshd_effective.stdout_lines
+             | select('match', '^allowgroups ') | list | first | default('') }}
+
+    # AllowUsers/AllowGroups внутри Match переопределить нельзя — если хост
+    # ими пользуется, пользователя туда придётся вписать руками
+    - name: Fail if the sshd allowlist excludes the identity user
+      ansible.builtin.assert:
+        that:
+          - autossh_identity_allowusers == '' or autossh_identity_user in autossh_identity_allowusers.split()
+          - autossh_identity_allowgroups == '' or autossh_identity_user in autossh_identity_allowgroups.split()
+        fail_msg: >-
+          sshd ограничивает вход списком
+          ({{ autossh_identity_allowusers }}{{ autossh_identity_allowgroups }}),
+          и {{ autossh_identity_user }} в него не входит. Внутри Match это не
+          лечится — допиши пользователя в AllowUsers/AllowGroups на хосте руками,
+          иначе туннели будут получать 'Permission denied'.
+
+    - name: Ensure the sshd drop-in directory exists
+      ansible.builtin.file:
+        path: "{{ autossh_identity_sshd_dropin | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Debian 12 / Ubuntu 22.04+ подключают sshd_config.d сами. У более старых
+    # такой строки нет, и drop-in молча не делал бы ничего
+    - name: Check that sshd_config includes the drop-in directory
+      ansible.builtin.command: >-
+        grep -qE '^[[:space:]]*[Ii]nclude[[:space:]]+/etc/ssh/sshd_config\.d/'
+        /etc/ssh/sshd_config
+      register: autossh_identity_include_check
+      changed_when: false
+      failed_when: false
+
+    - name: Include the drop-in directory from sshd_config
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        line: "Include /etc/ssh/sshd_config.d/*.conf"
+        insertbefore: BOF
+        firstmatch: true
+      when: autossh_identity_include_check.rc != 0
+      register: autossh_identity_include_added
+
+    - name: Deploy the sshd drop-in for the identity user
+      ansible.builtin.template:
+        src: sshd_autossh.conf.j2
+        dest: "{{ autossh_identity_sshd_dropin }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: autossh_identity_dropin
+
+    # проверяется ВЕСЬ конфиг вместе с include: на одном фрагменте sshd -t
+    # не сработает, он там не найдёт хост-ключей
+    - name: Validate the sshd configuration
+      ansible.builtin.command: "{{ autossh_identity_sshd_bin }} -t"
+      changed_when: false
+
+    # reload, а не restart: живые ssh-сессии не рвутся, включая ту,
+    # через которую прямо сейчас работает сам Ansible
+    - name: Reload sshd
+      ansible.builtin.service:
+        name: "{{ autossh_identity_sshd_service }}"
+        state: reloaded
+      when: autossh_identity_dropin is changed or autossh_identity_include_added is changed
+
+  rescue:
+
+    - name: Rollback - remove the drop-in
+      ansible.builtin.file:
+        path: "{{ autossh_identity_sshd_dropin }}"
+        state: absent
+
+    - name: Rollback - remove the Include line if this role added it
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        line: "Include /etc/ssh/sshd_config.d/*.conf"
+        state: absent
+      when: autossh_identity_include_added is defined and autossh_identity_include_added is changed
+
+    - name: Rollback - report result
+      ansible.builtin.fail:
+        msg: >-
+          Не удалось настроить sshd для {{ autossh_identity_user }}.
+          Изменения откачены, sshd НЕ перезагружался, доступ к серверу не затронут.
+          Причина — в выводе упавшей задачи выше.

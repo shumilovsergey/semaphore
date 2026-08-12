@@ -4,6 +4,7 @@
 server_roles:
   - nginx_certbot
   - nft
+  - autossh_identity
 
 #---vars
 

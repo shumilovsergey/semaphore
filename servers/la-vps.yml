@@ -3,6 +3,7 @@
 #---roles
 server_roles:
   - nginx_certbot
+  - autossh_identity
 
 #---vars
 

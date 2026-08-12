@@ -29,10 +29,10 @@ if [ -z "$SSH_KEY" ] || [ "$SSH_KEY" = "PUT_HERE_PUBKEY" ]; then
     echo "❌ SSH ключ не передан или не заменён."
     echo
     echo "Использование:"
-    echo "  curl -fsSL <url> | sudo bash -s \"<ssh public key>\" \"<semaphore ip>\""
+    echo "  curl -fsSL <url> -o /tmp/init.sh && sudo bash /tmp/init.sh \"<ssh public key>\" \"<semaphore ip>\""
     echo
     echo "Пример:"
-    echo "  curl -fsSL <url> | sudo bash -s \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...\" \"10.10.30.100\""
+    echo "  curl -fsSL <url> -o /tmp/init.sh && sudo bash /tmp/init.sh \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...\" \"10.10.30.100\""
     exit 1
 fi
 
