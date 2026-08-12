@@ -1,21 +1,12 @@
 ---
-# Общие для всех туннелей значения. Перебиваются в servers/<hostname>.yml,
-# а любое поле — ещё и внутри конкретного туннеля.
 
-# Системный пользователь, от которого работает autossh.
-# Ему нужен доступ на чтение к приватному ключу, поэтому это не service_ansible
-# (у того nologin и нет home) — см. README роли.
-autossh_user: sh
-
-# Пользователь и ключ для подключения к удалённому хосту
-autossh_ssh_user: sh
-autossh_ssh_key: "/home/{{ autossh_user }}/.ssh/id_rsa"
+autossh_user: ansible-autossh-user       # от кого работает systemd-юнит (локально)
+autossh_ssh_user: ansible-autossh-user   # под кем логинимся на ssh_host (удалённо)
+autossh_ssh_key: /home/ansible-autossh-user/.ssh/id_ed25519
 
 # Значения по умолчанию для полей туннеля
-autossh_default_type: L            # L — обычный (порт открывается локально)
-                                   # R — обратный (порт открывается на удалённом хосте)
-autossh_default_bind: 127.0.0.1    # 127.0.0.1 — туннель виден только с самой машины
-                                   # 0.0.0.0   — туннель доступен из сети
+autossh_default_type: L
+autossh_default_bind: 127.0.0.1 
 autossh_default_dest_host: 127.0.0.1
 
 # Параметры ssh-сессии
@@ -27,12 +18,10 @@ autossh_strict_host_key_checking: accept-new   # чтобы сервис не п
 autossh_restart_sec: 5
 autossh_unit_dir: /etc/systemd/system
 
-# Список туннелей = полное состояние хоста: туннель, которого нет в списке,
-# останавливается и удаляется. Роль трогает только юниты со своей меткой —
-# написанные руками сервисы не считаются её и не удаляются.
 autossh_prune: true
 autossh_marker: "# autossh-role-managed"
 
+autossh_tunnels: []
 # Список туннелей. Заполняется в servers/<hostname>.yml
 # autossh_tunnels:
 #   - name: awg-vpn-reserv      # -> /etc/systemd/system/awg-vpn-reserv.service
@@ -41,11 +30,36 @@ autossh_marker: "# autossh-role-managed"
 #     listen_port: 35152        # какой порт открывается
 #     dest_host: 127.0.0.1      # куда пробрасывать, по умолчанию 127.0.0.1
 #     dest_port: 35152          # по умолчанию = listen_port
-#     ssh_host: 5.189.254.175   # к какому серверу идёт ssh
+#     ssh_host: 5.157.43.175   # к какому серверу идёт ssh
 #     # необязательные, перебивают значения выше:
 #     # user: sh
 #     # ssh_user: sh
 #     # ssh_key: /home/sh/.ssh/id_rsa
 #     # description: "своё описание в [Unit]"
 #     # options: ["Compression=yes", "Port=2222"]   # доп. -o опции ssh
-autossh_tunnels: []
+
+
+# ПАМЯТКА! -R -----------------------------------#
+
+# server_1 -> -R -> server_2
+# Я запускаю туннель server_1, чтобы через server_2 попасть на server_1  Поэтому:
+
+# dest_host:dest_port - это сервис на server_1
+# bind:listen_port - это вход на server_2
+
+
+# ПАМЯТКА! firewall (nft) ------------------------#
+
+# роль nft должна идти раньше!
+#
+# nft_allow_input_extra — дописать но в файл ТОГО сервера, где порт реально слушается.
+# А это разные серверы для L и R:
+#   L + bind: 0.0.0.0    порт открывается ЗДЕСЬ (там же, где юнит)
+#                        -> nft_allow_input_extra в ЭТОТ servers/<hostname>.yml
+
+#   R + bind: 0.0.0.0    порт открывается на ssh_host
+#                        -> nft_allow_input_extra в файл ssh_host, НЕ в этот
+
+#   bind: 127.0.0.1      открывать нечего, слушает только loopback
+
+

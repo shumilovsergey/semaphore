@@ -1,0 +1,20 @@
+# {{ ansible_managed }} — роль autossh_identity, правки руками затрутся
+# {{ autossh_identity_sshd_dropin }}
+#
+# Права выданы ТОЛЬКО пользователю {{ autossh_identity_user }}, всех остальных
+# этот файл не касается.
+#
+# Match all в конце — обязателен
+# и применялось бы только к {{ autossh_identity_user }}.
+
+Match User {{ autossh_identity_user }}
+    # ради этой строки всё и затевалось
+    AllowTcpForwarding yes
+    GatewayPorts {{ autossh_identity_gateway_ports }}
+
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTunnel no
+
+Match all
