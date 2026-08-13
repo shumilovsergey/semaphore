@@ -41,3 +41,6 @@ nft_allow_input_extra:
   - { port: 9256, comment: "process exporter" }
   - { port: 35605, comment: "soks-tun" }
   - { port: 35152, comment: "awg-tun" }
+
+autossh_tunnels:
+  - {name: grafana, type: R, listen_port: 3000, dest_port: 3000, ssh_host: 45.131.41.34}
