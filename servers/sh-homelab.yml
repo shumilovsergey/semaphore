@@ -1,16 +1,12 @@
 ---
 
+#---roles
 server_roles:
   - prometheus
   - node_exporter
+  - autossh_identity
+  - autossh
 
-
-# prometheus
-prom_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/prometheus"
-prom_path: "/opt/prometheus"
-prometheus_port: "9090"
-
-# node_exporter
-node_exporter_url: "http://10.10.30.165:9004/EXPOFORUM/s3/raw/branch/main/node_exporter"
-node_exporter_path: "/opt/node_exporter"
-node_exporter_port: "9100"
+#---vars
+autossh_tunnels:
+  - {name: grafana, type: R, listen_port: 3000, dest_port: 3000, ssh_host: 45.131.41.34}
