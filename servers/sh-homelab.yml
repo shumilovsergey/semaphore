@@ -9,4 +9,20 @@ server_roles:
 
 #---vars
 autossh_tunnels:
-  - {name: grafana, type: R, listen_port: 3000, dest_port: 3000, ssh_host: 45.131.41.34}
+  - {name: grafana-autossh, type: R, listen_port: 3000, dest_port: 3000, ssh_host: 45.131.41.34}
+  - {name: semaphore-autossh, type: R, listen_port: 9005, dest_port: 9005, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 9107, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+
+  
