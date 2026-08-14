@@ -11,18 +11,12 @@ server_roles:
 autossh_tunnels:
   - {name: grafana-autossh, type: R, listen_port: 3000, dest_port: 3000, ssh_host: 45.131.41.34}
   - {name: semaphore-autossh, type: R, listen_port: 9005, dest_port: 9005, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 9107, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
-  # - {name: name, type: R, listen_port: 0000, dest_port: 0000, ssh_host: 45.131.41.34}
+  - {name: ntfy-autossh, type: R, listen_port: 9107, dest_port: 9107, ssh_host: 45.131.41.34}
+  - {name: sendbox-autossh, type: R, listen_port: 9101, dest_port: 443, ssh_host: 45.131.41.34}
+  - {name: vault-autossh, type: R, listen_port: 9000, dest_port: 9000, ssh_host: 45.131.41.34}
+  - {name: prometheus-autossh, type: R, listen_port: 9090, dest_port: 9090, ssh_host: 45.131.41.34}
+  - {name: buba-cloud-autossh, type: R, listen_port: 9102, dest_port: 9102, ssh_host: 45.131.41.34}
+  - {name: youtrack-autossh, type: R, listen_port: 9999, dest_port: 9999, ssh_host: 45.131.41.34}
+
 
   
