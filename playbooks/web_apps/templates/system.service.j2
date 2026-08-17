@@ -7,6 +7,8 @@ Type=simple
 User=root
 WorkingDirectory={{ app_path }}
 
+{# APP_NAME берётся из app_name плейбука; явное значение в env перекроет его — systemd берёт последнее #}
+Environment=APP_NAME={{ app_name }}
 {% for key, value in app_config.env.items() %}
 Environment={{ key }}={{ value }}
 {% endfor %}
