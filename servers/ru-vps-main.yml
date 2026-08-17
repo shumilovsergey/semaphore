@@ -24,6 +24,7 @@ nginx_sites:
   - { name: ntfy,   domain: ntfy.sh-development.ru,   port: 9107, vpn_only: false }
   - { name: sendbox,   domain: sendbox.sh-development.ru,   port: 9101, vpn_only: false }
   - { name: nom-nom,   domain: nom-nom.sh-development.ru,   port: 9001, vpn_only: false }
+  - { name: qcode,   domain: qcode.sh-development.ru,   port: 9106, vpn_only: false }
 
   # privat
   - { name: semaphore,   domain: semaphore.sh-development.ru,   port: 9005, vpn_only: true }
