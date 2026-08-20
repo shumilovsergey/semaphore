@@ -21,7 +21,7 @@ nginx_sites:
   - { name: wgetbash,   domain: wgetbash.sh-development.ru,   port: 9105, vpn_only: false }
   - { name: youtrack,   domain: youtrack.sh-development.ru,   port: 9999, vpn_only: false }
   - { name: zhenshen,   domain: zhenshen.sh-development.ru,   port: 10001, vpn_only: false }
-  - { name: ntfy,   domain: ntfy.sh-development.ru,   port: 9107, vpn_only: false }
+  # - { name: ntfy,   domain: ntfy.sh-development.ru,   port: 9107, vpn_only: false }
   - { name: sendbox,   domain: sendbox.sh-development.ru,   port: 9101, vpn_only: false }
   - { name: nom-nom,   domain: nom-nom.sh-development.ru,   port: 9001, vpn_only: false }
   - { name: qcode,   domain: qcode.sh-development.ru,   port: 9106, vpn_only: false }
@@ -35,7 +35,6 @@ nginx_sites:
   - { name: vault,   domain: vault.sh-development.ru,   port: 9000, vpn_only: true }
 
 nft_allow_input_extra:
-  # - { port: , comment: "" }
   - { port: 80, comment: "http" }
   - { port: 443, comment: "https" }
   - { port: 9100, comment: "node exporter" }
