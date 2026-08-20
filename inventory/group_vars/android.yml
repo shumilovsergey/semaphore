@@ -1,0 +1,4 @@
+ansible_user: u0_a226
+ansible_python_interpreter: /data/data/com.termux/files/usr/bin/python
+ansible_shell_executable: /data/data/com.termux/files/usr/bin/bash
+ansible_become: false
