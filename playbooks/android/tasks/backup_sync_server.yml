@@ -29,32 +29,34 @@
         srv_dir: "{{ backup_dest }}/{{ backup_server }}"
         srv_gen: "{{ backup_dest }}/{{ backup_server }}/backup-{{ backup_stamp }}"
 
-    # У scp нет --delete, поэтому staging сносится целиком. Он обязан быть
-    # зеркалом ТЕКУЩЕГО состояния сервера: иначе файлы, которые ротация на
-    # сервере уже удалила, осели бы в нём навсегда, и каждое поколение на
-    # телефоне тащило бы всю историю — каталог рос бы бесконечно.
-    - name: Reset staging directory
+    - name: Ensure staging root exists
       ansible.builtin.file:
-        path: "{{ srv_staging }}"
-        state: absent
-      delegate_to: localhost
-
-    - name: Create staging directory
-      ansible.builtin.file:
-        path: "{{ srv_staging }}"
+        path: "{{ backup_staging }}"
         state: directory
         mode: "0700"
       delegate_to: localhost
 
-    # '/.' в конце источника — копируем СОДЕРЖИМОЕ /backup, а не саму папку
-    # внутрь staging.
+    # scp не умеет "скопировать содержимое каталога". Через '/.' он падает
+    # с `unexpected filename: .`, а если каталог назначения уже существует —
+    # кладёт источник ВНУТРЬ него. Значит назначения быть не должно, и сносим
+    # мы его в той же команде: иначе вторая попытка после обрыва вложила бы
+    # копию в недокачанную первую.
+    #
+    # Снос заодно заменяет rsync-овский --delete: staging обязан быть
+    # зеркалом ТЕКУЩЕГО состояния сервера, иначе файлы, которые ротация на
+    # сервере уже удалила, осели бы в нём навсегда, и каждое поколение на
+    # телефоне тащило бы всю историю.
     - name: "Hop 1 — pull {{ srv_src }} into staging"
-      ansible.builtin.command:
-        argv: >-
-          {{ ['scp'] + backup_scp_opts + ['-r', '-P', srv_port | string]
-             + backup_ssh_opts.split()
-             + [srv_user ~ '@' ~ srv_host ~ ':' ~ srv_src ~ '/.',
-                srv_staging ~ '/'] }}
+      ansible.builtin.shell:
+        cmd: >-
+          rm -rf {{ srv_staging | quote }} &&
+          scp {{ scp_opts | map('quote') | join(' ') }}
+          {{ (srv_user ~ '@' ~ srv_host ~ ':' ~ srv_src) | quote }}
+          {{ srv_staging | quote }}
+      vars:
+        scp_opts: >-
+          {{ backup_scp_opts + ['-r', '-P', srv_port | string]
+             + backup_ssh_opts.split() }}
       delegate_to: localhost
       register: hop1
       until: hop1.rc == 0
@@ -95,8 +97,7 @@
     # Мусор от прошлых оборванных запусков. Докачивать его не пробуем: целиком
     # перелить дешевле, чем доказать, что недокачанное осталось консистентным.
     # mkdir -p вместо file: заодно обходит биты прав, которых на /sdcard нет.
-    # Каталог поколения создаём здесь же — scp -r в несуществующий путь
-    # ведёт себя по-разному в зависимости от протокола.
+    # Сам каталог поколения НЕ создаём: его должен создать scp (см. hop 2).
     - name: Prepare a clean slot on the phone
       ansible.builtin.shell:
         executable: "{{ termux_prefix }}/bin/bash"
@@ -104,20 +105,30 @@
           set -eu
           mkdir -p '{{ srv_dir }}'
           rm -rf '{{ srv_dir }}'/backup-*.incomplete
-          mkdir -p '{{ srv_gen }}.incomplete'
       changed_when: false
 
     # Права на общее хранилище Android не тащим: там их просто нет. scp без -p
     # их и не переносит, так что отдельные флаги больше не нужны.
-    # Ретрай безопасен: пишем в свой каталог поколения, повтор перезаписывает
-    # те же файлы и лишних не создаёт.
+    #
+    # Каталог поколения, как и staging на hop 1, должен отсутствовать к моменту
+    # запуска scp — поэтому сносим его по ssh прямо здесь, перед каждой
+    # попыткой. Трогается только .incomplete текущего прогона, готовые
+    # поколения не при делах.
     - name: "Hop 2 — push staging into {{ backup_server }}/backup-{{ backup_stamp }}.incomplete"
-      ansible.builtin.command:
-        argv: >-
-          {{ ['scp'] + backup_scp_opts + ['-r', '-P', phone_port | string]
-             + backup_ssh_opts.split()
-             + [srv_staging ~ '/.',
-                phone_user ~ '@' ~ phone_host ~ ':' ~ srv_gen ~ '.incomplete/'] }}
+      ansible.builtin.shell:
+        cmd: >-
+          ssh {{ ssh_opts | map('quote') | join(' ') }}
+          {{ (phone_user ~ '@' ~ phone_host) | quote }}
+          {{ ('rm -rf ' ~ srv_gen ~ '.incomplete') | quote }} &&
+          scp {{ scp_opts | map('quote') | join(' ') }}
+          {{ srv_staging | quote }}
+          {{ (phone_user ~ '@' ~ phone_host ~ ':' ~ srv_gen ~ '.incomplete') | quote }}
+      vars:
+        ssh_opts: >-
+          {{ ['-p', phone_port | string] + backup_ssh_opts.split() }}
+        scp_opts: >-
+          {{ backup_scp_opts + ['-r', '-P', phone_port | string]
+             + backup_ssh_opts.split() }}
       delegate_to: localhost
       register: hop2
       until: hop2.rc == 0
