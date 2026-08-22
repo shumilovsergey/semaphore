@@ -10,14 +10,14 @@
 # async здесь намеренно нет. Он ставился как страховка от вечного зависания,
 # но /backup — это сотни килобайт и доли секунды, а async на этом хосте тащит
 # за собой Termux-пути и ломается сам (см. README папки). Зависшую передачу
-# закрывают rsync --timeout и ServerAliveInterval, и падают они с внятной
-# ошибкой, а не бесконечным ASYNC POLL.
+# закрывает ServerAliveInterval/CountMax, и падает она с внятной ошибкой,
+# а не бесконечным ASYNC POLL.
 
 - name: "Sync {{ backup_server }}"
   block:
 
     # backup_src берём из host_vars сервера, если он там переопределён.
-    # Реквизиты подключения — из inventory, чтобы rsync ходил тем же путём,
+    # Реквизиты подключения — из inventory, чтобы scp ходил тем же путём,
     # что и обычные задачи Ansible.
     - name: Resolve connection details
       ansible.builtin.set_fact:
@@ -29,32 +29,38 @@
         srv_dir: "{{ backup_dest }}/{{ backup_server }}"
         srv_gen: "{{ backup_dest }}/{{ backup_server }}/backup-{{ backup_stamp }}"
 
-    - name: Ensure staging directory exists
+    # У scp нет --delete, поэтому staging сносится целиком. Он обязан быть
+    # зеркалом ТЕКУЩЕГО состояния сервера: иначе файлы, которые ротация на
+    # сервере уже удалила, осели бы в нём навсегда, и каждое поколение на
+    # телефоне тащило бы всю историю — каталог рос бы бесконечно.
+    - name: Reset staging directory
+      ansible.builtin.file:
+        path: "{{ srv_staging }}"
+        state: absent
+      delegate_to: localhost
+
+    - name: Create staging directory
       ansible.builtin.file:
         path: "{{ srv_staging }}"
         state: directory
         mode: "0700"
       delegate_to: localhost
 
-    # --delete обязателен: staging должен быть зеркалом ТЕКУЩЕГО состояния
-    # сервера. Без него файлы, которые ротация на сервере уже удалила, оседали
-    # бы в staging навсегда, и каждое поколение на телефоне тащило бы всю
-    # историю — каталог рос бы бесконечно.
+    # '/.' в конце источника — копируем СОДЕРЖИМОЕ /backup, а не саму папку
+    # внутрь staging.
     - name: "Hop 1 — pull {{ srv_src }} into staging"
       ansible.builtin.command:
-        argv:
-          - rsync
-          - -rti
-          - --delete
-          - "--timeout={{ backup_io_timeout }}"
-          - "--rsync-path={{ backup_rsync_path }}"
-          - -e
-          - "ssh -p {{ srv_port }} {{ backup_ssh_opts }}"
-          - "{{ srv_user }}@{{ srv_host }}:{{ srv_src }}/"
-          - "{{ srv_staging }}/"
+        argv: >-
+          {{ ['scp'] + backup_scp_opts + ['-r', '-P', srv_port | string]
+             + backup_ssh_opts.split()
+             + [srv_user ~ '@' ~ srv_host ~ ':' ~ srv_src ~ '/.',
+                srv_staging ~ '/'] }}
       delegate_to: localhost
       register: hop1
-      changed_when: hop1.stdout | length > 0
+      until: hop1.rc == 0
+      retries: "{{ backup_transfer_retries }}"
+      delay: "{{ backup_transfer_delay }}"
+      changed_when: true
 
     - name: Count files and bytes in staging
       ansible.builtin.shell:
@@ -89,6 +95,8 @@
     # Мусор от прошлых оборванных запусков. Докачивать его не пробуем: целиком
     # перелить дешевле, чем доказать, что недокачанное осталось консистентным.
     # mkdir -p вместо file: заодно обходит биты прав, которых на /sdcard нет.
+    # Каталог поколения создаём здесь же — scp -r в несуществующий путь
+    # ведёт себя по-разному в зависимости от протокола.
     - name: Prepare a clean slot on the phone
       ansible.builtin.shell:
         executable: "{{ termux_prefix }}/bin/bash"
@@ -96,27 +104,26 @@
           set -eu
           mkdir -p '{{ srv_dir }}'
           rm -rf '{{ srv_dir }}'/backup-*.incomplete
+          mkdir -p '{{ srv_gen }}.incomplete'
       changed_when: false
 
-    # Права на общее хранилище Android не тащим: там их просто нет, и rsync
-    # без этих флагов заваливает вывод ошибками chown/chmod.
-    # --delete не нужен: пишем в заведомо пустой каталог.
+    # Права на общее хранилище Android не тащим: там их просто нет. scp без -p
+    # их и не переносит, так что отдельные флаги больше не нужны.
+    # Ретрай безопасен: пишем в свой каталог поколения, повтор перезаписывает
+    # те же файлы и лишних не создаёт.
     - name: "Hop 2 — push staging into {{ backup_server }}/backup-{{ backup_stamp }}.incomplete"
       ansible.builtin.command:
-        argv:
-          - rsync
-          - -rti
-          - --no-perms
-          - --no-owner
-          - --no-group
-          - "--timeout={{ backup_io_timeout }}"
-          - -e
-          - "ssh -p {{ phone_port }} {{ backup_ssh_opts }}"
-          - "{{ srv_staging }}/"
-          - "{{ phone_user }}@{{ phone_host }}:{{ srv_gen }}.incomplete/"
+        argv: >-
+          {{ ['scp'] + backup_scp_opts + ['-r', '-P', phone_port | string]
+             + backup_ssh_opts.split()
+             + [srv_staging ~ '/.',
+                phone_user ~ '@' ~ phone_host ~ ':' ~ srv_gen ~ '.incomplete/'] }}
       delegate_to: localhost
       register: hop2
-      changed_when: hop2.stdout | length > 0
+      until: hop2.rc == 0
+      retries: "{{ backup_transfer_retries }}"
+      delay: "{{ backup_transfer_delay }}"
+      changed_when: true
 
     - name: Count files and bytes in the new generation
       ansible.builtin.shell:
@@ -129,9 +136,11 @@
       changed_when: false
       register: dst_count
 
-    # rsync с кодом 0 — необходимо, но не достаточно: оборванное соединение,
+    # scp с кодом 0 — необходимо, но не достаточно: оборванное соединение,
     # кончившееся место на телефоне и битый FUSE выглядят по-разному, а вот
     # "файлов и байт столько же, сколько в источнике" ловит их все разом.
+    # Здесь ретраев нет намеренно: после чистого выхода scp расхождение
+    # означает кончившееся место или битый FUSE — повтор перельёт то же самое.
     - name: New generation matches the source
       ansible.builtin.assert:
         that:

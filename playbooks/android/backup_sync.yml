@@ -3,7 +3,7 @@
 # Телефон не видит серверы напрямую, поэтому данные идут в два прыжка через
 # Ansible-хост:
 #
-#   сервер:/backup  ──rsync──>  staging на Ansible-хосте  ──rsync──>  телефон
+#   сервер:/backup  ──scp──>  staging на Ansible-хосте  ──scp──>  телефон
 #
 # ----- ШАБЛОН Semaphore extra ENV JSON
 #
@@ -37,13 +37,29 @@
     backup_generations: 3
 
 
-    backup_io_timeout: 60
+    # Транспорт — scp на обоих прыжках. Один механизм на все устройства:
+    # rsync требует бинарник на ОБЕИХ сторонах, а на RouterOS его нет и
+    # поставить некуда. Инкрементальности не теряем: hop 2 и раньше лил всё
+    # целиком (каталог поколения всегда пустой), а /backup — это сотни
+    # килобайт.
+    #
+    # -O включает старый протокол SCP вместо SFTP: RouterOS его понимает
+    # надёжнее. Нужен OpenSSH >= 8.6 на контроллере; на старом — очистить
+    # список, тогда пойдёт SFTP.
+    backup_scp_opts:
+      - -O
 
-    backup_rsync_path: "sudo rsync"
-
+    # ServerAliveInterval * ServerAliveCountMax = потолок молчания в секундах.
+    # У scp нет rsync-овского --timeout, зависшую передачу закрывает это.
     backup_ssh_opts: >-
       -o BatchMode=yes -o StrictHostKeyChecking=accept-new
       -o ConnectTimeout=15 -o ServerAliveInterval=15
+      -o ServerAliveCountMax=4
+
+    # Оборванная передача — вещь преходящая, поэтому ретраим сам scp.
+    # Исчерпали попытки -> rescue -> сервер помечен FAILED, прогон идёт дальше.
+    backup_transfer_retries: 3
+    backup_transfer_delay: 5
 
   pre_tasks:
     - name: Server list is not empty
@@ -64,24 +80,29 @@
           Нет в inventory: {{ backup_servers | difference(hostvars.keys() | list) | join(', ') }}.
         success_msg: "Все серверы найдены в inventory"
 
-    - name: Check rsync on the phone
+    # При -O контроллер запускает на той стороне `scp -t`, поэтому бинарник
+    # нужен и на телефоне тоже. RouterOS реализует протокол сам, ему нечего
+    # проверять.
+    - name: Check scp on the phone
       ansible.builtin.stat:
-        path: "{{ termux_prefix }}/bin/rsync"
-      register: termux_rsync
+        path: "{{ termux_prefix }}/bin/scp"
+      register: termux_scp
 
-    - name: Host is Termux and has rsync
+    - name: Host is Termux and has scp
       ansible.builtin.assert:
-        that: termux_rsync.stat.exists
+        that: termux_scp.stat.exists
         fail_msg: >
-          Не найден {{ termux_prefix }}/bin/rsync.
+          Не найден {{ termux_prefix }}/bin/scp.
           Если это не Termux — проверь ansible_host/ansible_port в inventory.
-          Если Termux — поставь пакет: pkg install rsync
+          Если Termux — поставь пакет: pkg install openssh
         success_msg: "Termux найден: {{ termux_prefix }}"
 
-    - name: Check rsync on the Ansible host
-      ansible.builtin.command: rsync --version
+    - name: Check scp on the Ansible host
+      ansible.builtin.shell: "command -v scp"
       delegate_to: localhost
+      register: ctrl_scp
       changed_when: false
+      failed_when: ctrl_scp.rc != 0
 
     # delegate_to подменяет ansible_host/ansible_user/ansible_port
     - name: Remember phone connection details
