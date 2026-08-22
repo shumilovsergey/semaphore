@@ -3,5 +3,6 @@ ansible_user: ansible
 ansible_connection: ssh
 ansible_become: false
 
-# что забираем с роутера
-backup_src: /backup
+# Что забираем с роутера. Без ведущего слеша: в RouterOS путь — это имя
+# из `/file print`, а там каталог называется просто "backup".
+backup_src: backup
