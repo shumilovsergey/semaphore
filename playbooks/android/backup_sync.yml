@@ -189,12 +189,37 @@
               Phone free:            {{ (stats.free_kb | int * 1024) | human_readable }}
               Phone used by backups: {{ used_bytes | int | human_readable }}
 
+        - name: Remember which servers did not sync
+          ansible.builtin.set_fact:
+            backup_failed: >-
+              {{ backup_results | rejectattr('status', 'eq', 'OK')
+                 | map(attribute='server') | list }}
+
+        # Письмо уходит ДО assert: тот валит плей, и всё, что после него,
+        # уже не выполнится.
+        - name: Notify by email about servers that did not sync
+          ansible.builtin.include_role:
+            name: notify_email
+          vars:
+            notify_email_subject: >-
+              [Ansible] backup_sync: {{ backup_failed | length }} из
+              {{ backup_servers | length }} не синхронизированы
+            notify_email_body: |
+              Прогон: {{ backup_stamp }}
+
+              {% for r in backup_results %}
+              {{ '%-18s' | format(r.server) }} {{ r.status }}{{ ' — ' + r.msg if r.msg else '' }}
+              {% endfor %}
+
+              Прошлые поколения упавших серверов на телефоне не тронуты.
+              Подробности — в логе задачи Semaphore.
+          when: backup_failed | length > 0
+
         - name: All servers synced successfully
           ansible.builtin.assert:
-            that: backup_results | rejectattr('status', 'eq', 'OK') | list | length == 0
+            that: backup_failed | length == 0
             fail_msg: >
-              Не синхронизированы:
-              {{ backup_results | rejectattr('status', 'eq', 'OK') | map(attribute='server') | join(', ') }}.
+              Не синхронизированы: {{ backup_failed | join(', ') }}.
               Прошлые поколения этих серверов на телефоне не тронуты.
             success_msg: "Все серверы синхронизированы"
 
