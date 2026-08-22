@@ -1,7 +1,4 @@
 # RouterOS — не Linux: нет sudo, нет python, нет шелла.
-# Хост нужен только как источник бэкапов: hop 1 в
-# playbooks/android/backup_sync.yml читает эти переменные из hostvars
-# и ходит на роутер с контроллера, сам Ansible на него не подключается.
 ansible_user: ansible
 ansible_connection: ssh
 ansible_become: false
