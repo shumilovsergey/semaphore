@@ -5,4 +5,4 @@ ansible_become: false
 
 # Что забираем с роутера. Без ведущего слеша: в RouterOS путь — это имя
 # из `/file print`, а там каталог называется просто "backup".
-backup_src: backup
+backup_src: flash/backup
