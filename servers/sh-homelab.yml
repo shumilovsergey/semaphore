@@ -3,6 +3,7 @@
 #---roles
 server_roles:
   - prometheus
+  - smtp_worker
   - node_exporter
   - autossh_identity
   - autossh

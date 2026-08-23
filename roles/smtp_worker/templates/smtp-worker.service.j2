@@ -1,0 +1,26 @@
+[Unit]
+Description=smtp-worker — localhost SMTP gateway
+After=network.target
+
+[Service]
+Type=simple
+User={{ service_user }}
+
+WorkingDirectory={{ smtp_worker_path }}
+ExecStart={{ bin_path }}
+
+Environment="PORT={{ smtp_worker_port }}"
+Environment="APP_NAME={{ smtp_worker_app_name }}"
+Environment="DB_NAME={{ smtp_worker_db_name }}"
+{% for prefix, provider in smtp_worker_providers | dictsort %}
+
+{% for key, value in provider | dictsort %}
+Environment="{{ prefix }}_SMTP_{{ key }}={{ value }}"
+{% endfor %}
+{% endfor %}
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,33 @@
+# smtp-worker — локальный HTTP-шлюз к SMTP.
+# Слушает только 127.0.0.1, авторизации нет by design → порт в nft
+# открывать НЕ нужно и нельзя.
+
+smtp_worker_url: "https://auth-proxy.sh-development.ru/github/raw/shumilovsergey/smtp-worker/refs/heads/main/bin/smtp-worker"
+smtp_worker_path: "/opt/smtp-worker"
+smtp_worker_port: "8891"
+service_file_path: "/etc/systemd/system/smtp-worker.service"
+service_user: service_ansible
+
+bin_path: "{{ smtp_worker_path }}/smtp-worker"
+
+smtp_worker_app_name: "smtp-worker"
+smtp_worker_db_name: "smtp-worker.db"
+
+# Пароль из Variable Group "creds"
+smtp_worker_google_password: "{{ lookup('env', 'GOOGLE_SMTP_PASSWORD') }}"
+
+# Один провайдер = один роут (GET /google?subject=...&text=...).
+# Провайдер с ENABLED != "true" остаётся в конфиге, но роут не поднимается.
+smtp_worker_providers:
+  GOOGLE:
+    ENABLED: "true"
+    HOST: "smtp.gmail.com:587"
+    USER: "wumilovsergey@gmail.com"
+    PASSWORD: "{{ smtp_worker_google_password }}"
+    FROM_ADDRESS: "wumilovsergey@gmail.com"
+    # Пусто — подставится hostname сервера
+    FROM_NAME: ""
+    # Кому слать, если в запросе нет ?to=. Пусто — на USER.
+    TO_ADDRESS: ""
+    # MandatoryStartTLS | OpportunisticStartTLS | NoStartTLS
+    STARTTLS_POLICY: "MandatoryStartTLS"
