@@ -1,0 +1,4 @@
+- name: Restart smtp-worker
+  systemd:
+    name: smtp-worker
+    state: restarted
