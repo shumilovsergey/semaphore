@@ -10,6 +10,7 @@ run.yml                 — главный плейбук: разворачив�
 
 playbooks/              — уникальные задачи под конкретные ситуации
   android/              — телефон под бэкапы, цель Termux напрямую
+  identity/             — ротация ssh-ключа Ansible по всему парку
   web_apps/
 
 roles/                  — переиспользуемые рецепты (не знают про конкретные серверы)
@@ -51,6 +52,8 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 - [Подробнее про сервера](./servers/README.md)
 
 - [Телефон под бэкапы (Termux)](./playbooks/android/README.md)
+
+- [Ротация ssh-ключа Ansible](./playbooks/identity/README.md)
 
 - [Подключение TOTP](./tools/totp.md)
 

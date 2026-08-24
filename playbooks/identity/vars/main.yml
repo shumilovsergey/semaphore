@@ -1,0 +1,94 @@
+---
+
+# Переменные ротации ключа Ansible-контроллера.
+# Подключаются через vars_files во ВСЕ play плейбука ansible_identity.yml,
+# чтобы источник правды был один.
+
+# ------------------------режимы---------------#
+
+# precheck — только проверки, ничего не меняется
+# deploy   — стадии 1-3: NEW доезжает до всех хостов, OLD остаётся рабочим
+# cleanup  — стадия 4: OLD удаляется
+identity_phase: precheck
+
+# генерация новой пары. Включается последней, когда механика отлажена
+identity_generate: false
+
+# ------------------------контроллер---------------#
+
+# HOME пользователя, под которым Semaphore запускает ansible-playbook.
+# Именно его ~/.ssh/id_ed25519 — живой ключ, которым ходит весь парк.
+identity_ssh_dir: "{{ (lookup('env', 'HOME') | default('/home/ansible', true)) }}/.ssh"
+
+identity_key_current: "{{ identity_ssh_dir }}/id_ed25519"
+identity_key_new: "{{ identity_ssh_dir }}/id_ed25519_new"
+
+# Каталог поколений. Каждая ротация кладёт сюда свой <stamp>/ и НИЧЕГО
+# отсюда не удаляется — все когда-либо использованные ключи остаются здесь.
+identity_backup_root: "{{ identity_ssh_dir }}/rotation-backup"
+
+# Состояние ТЕКУЩЕЙ ротации, перезаписывается каждым прогоном: cleanup читает
+# отсюда отпечаток нового ключа и mikrotik-id, снятые в фазе deploy.
+identity_state_file: "{{ identity_ssh_dir }}/rotation-state.yml"
+
+# Журнал всех ротаций, только дописывается. Состояние живёт один прогон,
+# журнал — всё время: по нему видно, когда какой ключ сменился и какая
+# ротация не была доведена до cleanup.
+identity_history_file: "{{ identity_ssh_dir }}/rotation-history.log"
+
+identity_key_comment_prefix: ansible-fleet
+
+# Где лежит НОВЫЙ ключ прямо сейчас.
+# В deploy — ещё в _new, в cleanup — уже промотирован на место основного.
+identity_new_priv_file: "{{ identity_key_current if identity_phase == 'cleanup' else identity_key_new }}"
+identity_new_pub_file: "{{ identity_new_priv_file }}.pub"
+
+# Строка публичного ключа. lookup читается на контроллере и ленив:
+# до первого обращения файла может не быть, play 0 это проверяет раньше.
+identity_new_pub_line: "{{ lookup('file', identity_new_pub_file) | trim }}"
+
+# ------------------------цель---------------#
+
+# Semaphore передаёт пользователя через -u, в inventory его нет.
+# Тот же default('ansible'), что и в playbooks/android/tasks/backup_sync_server.yml
+identity_remote_user: "{{ ansible_user | default('ansible', true) }}"
+identity_remote_host: "{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}"
+identity_remote_port: "{{ hostvars[inventory_hostname].ansible_port | default(22) }}"
+
+# ------------------------проба логина---------------#
+
+# IdentitiesOnly=yes и IdentityAgent=none — несущие опции, не украшение.
+# Semaphore держит СТАРЫЙ ключ в ssh-agent. Без них проба стадии 3 залогинится
+# старым ключом, отчитается "новый работает", и стадия 4 выкосит весь парк.
+identity_ssh_opts: >-
+  -o BatchMode=yes -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=15 -o IdentitiesOnly=yes -o IdentityAgent=none
+
+identity_probe_marker: identity-probe-ok
+identity_probe_retries: 3
+identity_probe_delay: 5
+
+# ------------------------mikrotik---------------#
+
+identity_mikrotik_user: ansible
+
+# RouterOS может не принять ed25519 в /user/ssh-keys/import. Если так —
+# генерим для роутера отдельную RSA-пару и переопределяем эти две переменные,
+# всё остальное менять не придётся.
+identity_mikrotik_new_priv_file: "{{ identity_new_priv_file }}"
+identity_mikrotik_new_pub_file: "{{ identity_new_pub_file }}"
+
+identity_mikrotik_pub_line: "{{ lookup('file', identity_mikrotik_new_pub_file) | trim }}"
+
+# RouterOS показывает comment ключа в поле key-owner и только по нему может
+# отличить только что импортированный ключ от уже лежащих — на этом держится
+# идемпотентность импорта. Пустой comment запрещён асертом в play 0.
+identity_mikrotik_key_owner: "{{ identity_mikrotik_pub_line.split(' ')[2] | default('', true) }}"
+
+# имя, под которым .pub временно кладётся в файловую систему роутера
+identity_mikrotik_upload_name: rotate-new.pub
+
+# -O — старый протокол SCP вместо SFTP, RouterOS понимает его надёжнее.
+# Тот же набор, что в playbooks/android/backup_sync.yml
+identity_scp_opts:
+  - -O

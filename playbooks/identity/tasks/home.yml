@@ -1,0 +1,4 @@
+---
+# Группа home — обычные Linux-серверы. Вся логика в _linux.yml.
+- name: "home - linux key rotation"
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/_linux.yml"

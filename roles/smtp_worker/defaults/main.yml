@@ -13,7 +13,7 @@ bin_path: "{{ smtp_worker_path }}/smtp-worker"
 smtp_worker_app_name: "smtp-worker"
 smtp_worker_db_name: "smtp-worker.db"
 
-# Пароль из Variable Group "creds"
+# Пароль из Variable Group "creds" - GOOGLE_SMTP_PASSWORD
 smtp_worker_google_password: "{{ lookup('env', 'GOOGLE_SMTP_PASSWORD') }}"
 
 # Один провайдер = один роут (GET /google?subject=...&text=...).

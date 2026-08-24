@@ -1,0 +1,173 @@
+---
+
+# RouterOS. Здесь ничего от Linux не работает:
+#
+#   * нет python и нет шелла — только ansible.builtin.raw;
+#   * нет authorized_keys — ключи живут в /user/ssh-keys и привязаны к
+#     пользователю, добавляются импортом ЗАГРУЖЕННОГО на роутер файла;
+#   * удалять их приходится по внутреннему .id (*1, *2, ...), потому что
+#     сравнить содержимое ключа RouterOS не даёт.
+#
+# Отсюда главное отличие от остальных групп: список старых .id снимается на
+# стадии 1 фазы deploy и переживает до фазы cleanup в файле состояния на
+# контроллере. Полагаться на key-owner при удалении нельзя — это всего лишь
+# comment ключа, он может совпасть.
+
+# --- стадия 1: проверка -----------------------------------------------------
+
+- name: "MikroTik - router answers over the current key"
+  ansible.builtin.raw: "/system/identity/print"
+  register: identity_mt_identity
+  changed_when: false
+  when: identity_stage == 'check'
+
+- name: "MikroTik - list ssh keys of the ansible user"
+  ansible.builtin.raw: ':put [/user/ssh-keys/find where user="{{ identity_mikrotik_user }}"]'
+  register: identity_mt_find
+  changed_when: false
+  when: identity_stage == 'check'
+
+- name: "MikroTik - parse the current key ids"
+  ansible.builtin.set_fact:
+    identity_mt_old_ids: >-
+      {{ (identity_mt_find.stdout | replace('\r', '') | trim).split(';')
+         | select('match', '^\*') | list }}
+  when: identity_stage == 'check'
+
+- name: "MikroTik - the ansible user already has an ssh key"
+  ansible.builtin.assert:
+    that: identity_mt_old_ids | length > 0
+    fail_msg: >
+      У пользователя {{ identity_mikrotik_user }} на роутере нет ни одного
+      ssh-ключа. Значит вход туда идёт не по ключу и ротировать нечего.
+  when: identity_stage == 'check'
+
+- name: "MikroTik - record pre-rotation state"
+  ansible.builtin.set_fact:
+    identity_pre_state:
+      platform: routeros
+      user: "{{ identity_mikrotik_user }}"
+      ssh_key_ids: "{{ identity_mt_old_ids }}"
+  when: identity_stage == 'check'
+
+# --- стадия 2: добавить NEW рядом с OLD -------------------------------------
+
+# Повторный импорт создал бы дубликат, поэтому сначала смотрим, нет ли ключа
+# с таким же key-owner. Пустой comment запрещён асертом в play 0 — иначе эта
+# проверка ничего не проверяла бы.
+- name: "MikroTik - check whether the new key is already imported"
+  ansible.builtin.raw: >-
+    :put [:len [/user/ssh-keys/find where user="{{ identity_mikrotik_user }}"
+    key-owner="{{ identity_mikrotik_key_owner }}"]]
+  register: identity_mt_present
+  changed_when: false
+  when: identity_stage == 'install'
+
+- name: "MikroTik - decide whether an import is needed"
+  ansible.builtin.set_fact:
+    identity_mt_needs_import: "{{ (identity_mt_present.stdout | replace('\r', '') | trim) == '0' }}"
+  when: identity_stage == 'install'
+
+# Заливаем текущим (ещё рабочим) ключом. -O — старый протокол SCP вместо SFTP,
+# RouterOS понимает его надёжнее; тот же набор, что в android/backup_sync.yml.
+- name: "MikroTik - upload the new public key to the router"
+  ansible.builtin.shell:
+    cmd: >-
+      scp {{ scp_opts | map('quote') | join(' ') }}
+      {{ identity_mikrotik_new_pub_file | quote }}
+      {{ (identity_mikrotik_user ~ '@' ~ identity_remote_host ~ ':' ~ identity_mikrotik_upload_name) | quote }}
+  vars:
+    scp_opts: >-
+      {{ identity_scp_opts + ['-i', identity_key_current, '-P', identity_remote_port | string]
+         + identity_ssh_opts.split() }}
+  delegate_to: localhost
+  changed_when: true
+  when:
+    - identity_stage == 'install'
+    - identity_mt_needs_import | bool
+
+- name: "MikroTik - import the new public key"
+  ansible.builtin.raw: >-
+    /user/ssh-keys/import user={{ identity_mikrotik_user }}
+    public-key-file={{ identity_mikrotik_upload_name }}
+  register: identity_mt_import
+  changed_when: true
+  when:
+    - identity_stage == 'install'
+    - identity_mt_needs_import | bool
+
+# Файл на роутере больше не нужен — на flash место считанное
+- name: "MikroTik - drop the uploaded file"
+  ansible.builtin.raw: >-
+    /file/remove [find where name="{{ identity_mikrotik_upload_name }}"]
+  changed_when: true
+  when:
+    - identity_stage == 'install'
+    - identity_mt_needs_import | bool
+
+# import при ошибке (например ed25519 не поддержан прошивкой) может вернуть
+# сообщение и нулевой rc — считаем ключи сами
+- name: "MikroTik - confirm the new key is in place"
+  ansible.builtin.raw: >-
+    :put [:len [/user/ssh-keys/find where user="{{ identity_mikrotik_user }}"
+    key-owner="{{ identity_mikrotik_key_owner }}"]]
+  register: identity_mt_after
+  changed_when: false
+  when: identity_stage == 'install'
+
+- name: "MikroTik - the import actually happened"
+  ansible.builtin.assert:
+    that: (identity_mt_after.stdout | replace('\r', '') | trim) | int > 0
+    fail_msg: >
+      После импорта ключ с key-owner="{{ identity_mikrotik_key_owner }}" на
+      роутере не появился. Самая вероятная причина — прошивка не приняла тип
+      ключа. Вывод импорта: {{ identity_mt_import.stdout | default('—') }}.
+      Лечится отдельной парой для роутера: положи RSA-пару на контроллер и
+      переопредели identity_mikrotik_new_priv_file / _new_pub_file.
+  when: identity_stage == 'install'
+
+# --- стадия 4: оставить только NEW ------------------------------------------
+
+# Удаляем ровно те .id, что были на роутере ДО импорта — список приехал из
+# файла состояния, записанного в фазе deploy.
+- name: "MikroTik - remove the old ssh keys"
+  ansible.builtin.raw: "/user/ssh-keys/remove {{ item }}"
+  loop: "{{ identity_state.pre_state[inventory_hostname].ssh_key_ids }}"
+  changed_when: true
+  when: identity_stage == 'cleanup'
+
+- name: "MikroTik - count the remaining keys"
+  ansible.builtin.raw: ':put [:len [/user/ssh-keys/find where user="{{ identity_mikrotik_user }}"]]'
+  register: identity_mt_left
+  changed_when: false
+  when: identity_stage == 'cleanup'
+
+- name: "MikroTik - exactly one key is left"
+  ansible.builtin.assert:
+    that: (identity_mt_left.stdout | replace('\r', '') | trim) == '1'
+    fail_msg: >
+      У {{ identity_mikrotik_user }} на роутере осталось
+      {{ identity_mt_left.stdout | replace('\r', '') | trim }} ключей вместо
+      одного. Разберись руками: /user/ssh-keys/print where user="{{ identity_mikrotik_user }}"
+  when: identity_stage == 'cleanup'
+
+# --- стадия 3: логин по NEW -------------------------------------------------
+#
+# argv, а не строка: `:put "..."` должен доехать до RouterOS вместе с
+# кавычками, а command разобрал бы их по дороге через shlex.
+
+- name: "MikroTik - log in with the new key"
+  ansible.builtin.command:
+    argv: >-
+      {{ ['ssh', '-i', identity_mikrotik_new_priv_file]
+         + identity_ssh_opts.split()
+         + ['-p', identity_remote_port | string,
+            identity_mikrotik_user ~ '@' ~ identity_remote_host,
+            ':put "' ~ identity_probe_marker ~ '"'] }}
+  register: identity_mt_probe
+  until: identity_probe_marker in (identity_mt_probe.stdout | default(''))
+  retries: "{{ identity_probe_retries }}"
+  delay: "{{ identity_probe_delay }}"
+  changed_when: false
+  delegate_to: localhost
+  when: identity_stage == 'probe'

@@ -1,0 +1,108 @@
+---
+
+# Обычный Linux-сервер: ключи лежат в ~/.ssh/authorized_keys.
+#
+# Файл общий для групп vps и home — их vps.yml/home.yml просто подключают его.
+# Правило "один файл задач на одну группу" держится (play 0 считает именно
+# файлы групп), а логика не размножается копипастой.
+#
+# Стадия приходит снаружи в identity_stage. Разделение на стадии обеспечивают
+# границы play в ansible_identity.yml: стадия 2 гарантированно закончена на
+# ВСЕХ хостах прежде, чем где-либо начнётся стадия 4.
+
+# --- стадия 1: проверка -----------------------------------------------------
+
+- name: "Linux - host answers over the current key"
+  ansible.builtin.ping:
+  when: identity_stage == 'check'
+
+# Домашний каталог берём из passwd, а не собираем из /home/<user>:
+# у service-аккаунтов он часто лежит не там.
+- name: "Linux - resolve the ansible account"
+  ansible.builtin.command: "getent passwd {{ identity_remote_user }}"
+  register: identity_linux_passwd
+  changed_when: false
+  when: identity_stage == 'check'
+
+- name: "Linux - remember home directory and gid"
+  ansible.builtin.set_fact:
+    identity_linux_home: "{{ identity_linux_passwd.stdout.split(':')[5] }}"
+    identity_linux_gid: "{{ identity_linux_passwd.stdout.split(':')[3] }}"
+    identity_linux_authorized_keys: "{{ identity_linux_passwd.stdout.split(':')[5] }}/.ssh/authorized_keys"
+  when: identity_stage == 'check'
+
+- name: "Linux - stat authorized_keys"
+  ansible.builtin.stat:
+    path: "{{ identity_linux_authorized_keys }}"
+  register: identity_linux_ak
+  when: identity_stage == 'check'
+
+# Нет файла — значит вход идёт не по ключу этого пользователя, и наши
+# представления о хосте неверны. Лучше упасть здесь, чем на стадии 4.
+- name: "Linux - authorized_keys exists"
+  ansible.builtin.assert:
+    that: identity_linux_ak.stat.exists
+    fail_msg: >
+      Нет {{ identity_linux_authorized_keys }}. Ротировать нечего — проверь,
+      под каким пользователем Semaphore ходит на этот хост.
+  when: identity_stage == 'check'
+
+- name: "Linux - read authorized_keys"
+  ansible.builtin.slurp:
+    src: "{{ identity_linux_authorized_keys }}"
+  register: identity_linux_ak_body
+  when: identity_stage == 'check'
+
+- name: "Linux - record pre-rotation state"
+  ansible.builtin.set_fact:
+    identity_pre_state:
+      platform: linux
+      user: "{{ identity_remote_user }}"
+      authorized_keys: "{{ identity_linux_authorized_keys }}"
+      keys: >-
+        {{ (identity_linux_ak_body.content | b64decode).splitlines()
+           | map('trim') | reject('match', '^\s*(#|$)') | list | length }}
+  when: identity_stage == 'check'
+
+# --- стадия 2: добавить NEW рядом с OLD -------------------------------------
+
+# Именно append, а не перезапись: пока стадия 3 не прошла, OLD и любой
+# аварийный ключ обязаны остаться на месте.
+- name: "Linux - append the new key to authorized_keys"
+  ansible.builtin.lineinfile:
+    path: "{{ identity_linux_authorized_keys }}"
+    line: "{{ identity_new_pub_line }}"
+    state: present
+    create: false
+  when: identity_stage == 'install'
+
+# --- стадия 3: логин по NEW -------------------------------------------------
+
+- name: "Linux - log in with the new key"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -i {{ identity_new_priv_file }} {{ identity_ssh_opts }}
+      -p {{ identity_remote_port }}
+      {{ identity_remote_user }}@{{ identity_remote_host }}
+      echo {{ identity_probe_marker }}
+  register: identity_linux_probe
+  until: identity_probe_marker in (identity_linux_probe.stdout | default(''))
+  retries: "{{ identity_probe_retries }}"
+  delay: "{{ identity_probe_delay }}"
+  changed_when: false
+  delegate_to: localhost
+  when: identity_stage == 'probe'
+
+# --- стадия 4: оставить только NEW ------------------------------------------
+
+# Файл переписывается целиком — тот же приём, что в roles/autossh_identity:
+# аккаунт выделенный под ansible, посторонних ключей у него быть не должно,
+# и старый ключ при ротации обязан исчезнуть, а не "скорее всего исчезнуть".
+- name: "Linux - authorized_keys now holds exactly the new key"
+  ansible.builtin.copy:
+    content: "{{ identity_new_pub_line }}\n"
+    dest: "{{ identity_linux_authorized_keys }}"
+    owner: "{{ identity_remote_user }}"
+    group: "{{ identity_linux_gid }}"
+    mode: "0600"
+  when: identity_stage == 'cleanup'
