@@ -1,0 +1,100 @@
+---
+
+# Телефон под Termux. Механика та же, что у Linux, но своим файлом он стоит
+# не для красоты:
+#
+#   * Termux — не FHS. `~` в путях Ansible не раскрывается, поэтому домашний
+#     каталог зашит константой, а getent passwd тут спрашивать не у кого
+#     (см. комментарий в playbooks/android/github_clone.yml).
+#   * ansible_remote_tmp обязан указывать внутрь Termux, иначе модули не
+#     разложат свои временные файлы.
+#   * become здесь нет и быть не может, root на телефоне не предполагается
+#     (ansible_become: false приезжает из inventory/group_vars/android.yml).
+
+- name: Termux key rotation
+  vars:
+    termux_prefix: /data/data/com.termux/files/usr
+    termux_home: /data/data/com.termux/files/home
+    ansible_remote_tmp: /data/data/com.termux/files/usr/tmp
+    identity_termux_authorized_keys: /data/data/com.termux/files/home/.ssh/authorized_keys
+  block:
+
+    # --- стадия 1: проверка -------------------------------------------------
+
+    - name: "Termux - phone answers over the current key"
+      ansible.builtin.ping:
+      when: identity_stage == 'check'
+
+    - name: "Termux - stat authorized_keys"
+      ansible.builtin.stat:
+        path: "{{ identity_termux_authorized_keys }}"
+      register: identity_termux_ak
+      when: identity_stage == 'check'
+
+    - name: "Termux - authorized_keys exists"
+      ansible.builtin.assert:
+        that: identity_termux_ak.stat.exists
+        fail_msg: >
+          Нет {{ identity_termux_authorized_keys }}. Проверь, что sshd в Termux
+          поднят и ходит именно этим файлом (playbooks/android/README.md).
+      when: identity_stage == 'check'
+
+    - name: "Termux - read authorized_keys"
+      ansible.builtin.slurp:
+        src: "{{ identity_termux_authorized_keys }}"
+      register: identity_termux_ak_body
+      when: identity_stage == 'check'
+
+    - name: "Termux - record pre-rotation state"
+      ansible.builtin.set_fact:
+        identity_pre_state:
+          platform: termux
+          user: "{{ identity_remote_user }}"
+          authorized_keys: "{{ identity_termux_authorized_keys }}"
+          keys: >-
+            {{ (identity_termux_ak_body.content | b64decode).splitlines()
+               | map('trim') | reject('match', '^\s*(#|$)') | list | length }}
+      when: identity_stage == 'check'
+
+    # --- стадия 2: добавить NEW рядом с OLD ---------------------------------
+
+    - name: "Termux - append the new key to authorized_keys"
+      ansible.builtin.lineinfile:
+        path: "{{ identity_termux_authorized_keys }}"
+        line: "{{ identity_new_pub_line }}"
+        state: present
+        create: false
+        mode: "0600"
+      when: identity_stage == 'install'
+
+    # --- стадия 4: оставить только NEW --------------------------------------
+
+    # owner/group не задаём: файл и так принадлежит текущему пользователю,
+    # а числовых uid Termux в /etc/passwd всё равно нет.
+    - name: "Termux - authorized_keys now holds exactly the new key"
+      ansible.builtin.copy:
+        content: "{{ identity_new_pub_line }}\n"
+        dest: "{{ identity_termux_authorized_keys }}"
+        mode: "0600"
+      when: identity_stage == 'cleanup'
+
+# --- стадия 3: логин по NEW -------------------------------------------------
+#
+# Задача вынесена из block намеренно: она целиком выполняется на контроллере,
+# а termux-переменные из block (в первую очередь ansible_remote_tmp) указывают
+# на пути, которых на контроллере не существует.
+
+- name: "Termux - log in with the new key"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -i {{ identity_new_priv_file }} {{ identity_ssh_opts }}
+      -p {{ identity_remote_port }}
+      {{ identity_remote_user }}@{{ identity_remote_host }}
+      echo {{ identity_probe_marker }}
+  register: identity_termux_probe
+  until: identity_probe_marker in (identity_termux_probe.stdout | default(''))
+  retries: "{{ identity_probe_retries }}"
+  delay: "{{ identity_probe_delay }}"
+  changed_when: false
+  delegate_to: localhost
+  when: identity_stage == 'probe'

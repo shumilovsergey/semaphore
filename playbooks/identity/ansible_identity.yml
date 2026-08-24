@@ -1,0 +1,659 @@
+---
+
+# Ротация SSH-ключа Ansible-контроллера по всему парку.
+#
+# Ключ ~/.ssh/id_ed25519 пользователя, под которым Semaphore запускает
+# ansible-playbook — это живой ключ, которым он ходит на КАЖДЫЙ хост.
+# Пропустить один хост при ротации = потерять к нему доступ насовсем.
+#
+#   Стадия 1   server: [OLD]           связь и предусловия, ничего не меняется
+#   Стадия 2   server: [OLD, NEW]      NEW разложен везде, OLD ещё работает
+#   Стадия 3   логин по NEW проверен    с контроллера, на каждом хосте
+#   Стадия 4   server: [NEW]           OLD удалён
+#
+# Стадия 4 живёт в ОТДЕЛЬНОМ прогоне. Между прогонами контроллер уже ходит
+# новым ключом, так что момента "у Semaphore нет рабочего ключа" не существует.
+#
+# ----- ШАБЛОН Semaphore extra ENV JSON
+#
+# {
+#   "target": "all",
+#   "identity_phase": "precheck"
+# }
+#
+#   precheck — только play 0 и 1. Ничего не меняет, для отладки.
+#   deploy   — стадии 1-3, затем бэкап OLD и промоушен NEW на контроллере.
+#   cleanup  — перепроверка NEW и стадия 4.
+#
+# Правило раскладки: ОДИН файл задач на ОДНУ группу inventory, имя файла
+# совпадает с именем группы. Play 0 считает хосты по группам и отказывается
+# стартовать, если сумма не сошлась с числом хостов в all. Новая группа в
+# inventory без своего tasks/<группа>.yml просто не даст запустить ротацию.
+
+
+# ============================================================================
+# Play 0 — проверки на контроллере. Дальше не пройдём, пока всё не сойдётся.
+# ============================================================================
+
+- name: Guards on the Ansible controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+
+    - name: Phase is one of precheck/deploy/cleanup
+      ansible.builtin.assert:
+        that: identity_phase in ['precheck', 'deploy', 'cleanup']
+        fail_msg: >
+          identity_phase='{{ identity_phase }}' — недопустимо.
+          Допустимые значения: precheck, deploy, cleanup.
+        success_msg: "Фаза: {{ identity_phase }}"
+
+    # Ротация имеет смысл только целиком по парку: ключ один на всех.
+    - name: Rotation runs against the whole fleet only
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target == 'all'
+        fail_msg: >
+          Ротация запускается ТОЛЬКО с target=all (сейчас:
+          '{{ target | default("не задан") }}'). Ключ на контроллере один на
+          весь парк — обновить его на части хостов значит потерять остальные.
+
+    # --- покрытие: каждая группа должна иметь свой файл задач --------------
+
+    # Файлы с префиксом "_" — общая реализация, которую подключают обёртки
+    # групп. Именами групп они не являются и в подсчёт не идут.
+    - name: Discover per-group task files
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/tasks"
+        patterns: "*.yml"
+        excludes: "_*.yml"
+        file_type: file
+      register: identity_found
+
+    - name: Map task files to inventory groups
+      ansible.builtin.set_fact:
+        identity_groups: >-
+          {{ identity_found.files | map(attribute='path') | map('basename')
+             | map('regex_replace', '\.yml$', '') | sort }}
+        identity_all_hosts: "{{ groups['all'] | default([]) | sort }}"
+
+    - name: At least one task file is present
+      ansible.builtin.assert:
+        that: identity_groups | length > 0
+        fail_msg: "В {{ playbook_dir }}/tasks нет ни одного файла группы."
+
+    - name: Every task file names a real inventory group
+      ansible.builtin.assert:
+        that: identity_groups | difference(groups.keys() | list) | length == 0
+        fail_msg: >
+          Файлы задач без одноимённой группы в inventory:
+          {{ identity_groups | difference(groups.keys() | list) | join(', ') }}.
+
+    - name: Count hosts covered by the task files
+      ansible.builtin.set_fact:
+        identity_covered: "{{ identity_groups | map('extract', groups) | flatten | sort }}"
+
+    - name: Show group coverage arithmetic
+      ansible.builtin.debug:
+        msg: |-
+          {% for identity_g in identity_groups %}
+          {{ identity_g }}: {{ groups[identity_g] | length }} ({{ groups[identity_g] | join(', ') }})
+          {% endfor %}
+          сумма по группам: {{ identity_covered | length }}
+          хостов в all:     {{ identity_all_hosts | length }}
+
+    # Два условия вместе дают "каждый хост покрыт ровно один раз":
+    # равенство множеств ловит непокрытый хост и лишний файл, равенство
+    # длин ловит хост, попавший в две покрытые группы — иначе он замаскировал
+    # бы собой чей-то непокрытый.
+    - name: Task files cover every host in all
+      ansible.builtin.assert:
+        that: identity_covered | unique | sort == identity_all_hosts
+        fail_msg: >
+          Не покрыты файлами задач:
+          {{ identity_all_hosts | difference(identity_covered) | join(', ') | default('—', true) }}.
+          Лишние хосты в покрытии:
+          {{ identity_covered | unique | difference(identity_all_hosts) | join(', ') | default('—', true) }}.
+
+    - name: Each host belongs to exactly one covered group
+      ansible.builtin.assert:
+        that: identity_covered | length == identity_all_hosts | length
+        fail_msg: >
+          Сумма по группам ({{ identity_covered | length }}) не равна числу
+          хостов в all ({{ identity_all_hosts | length }}) — какой-то хост
+          состоит сразу в двух покрытых группах.
+        success_msg: >
+          Покрытие сошлось: {{ identity_covered | length }} хостов,
+          {{ identity_groups | length }} групп.
+
+    # --- ключи на контроллере ----------------------------------------------
+
+    - name: Stat the current controller key
+      ansible.builtin.stat:
+        path: "{{ identity_key_current }}"
+      register: identity_cur_stat
+
+    - name: Current controller key is present
+      ansible.builtin.assert:
+        that: identity_cur_stat.stat.exists
+        fail_msg: >
+          Нет текущего ключа {{ identity_key_current }} — плейбук запущен не от
+          того пользователя, либо ключ лежит не там. HOME сейчас:
+          {{ lookup('env', 'HOME') }}.
+
+    - name: Fingerprint the current key
+      ansible.builtin.command: "ssh-keygen -lf {{ identity_key_current }}.pub"
+      register: identity_cur_fp_raw
+      changed_when: false
+
+    - name: Validate the new keypair
+      when: identity_phase in ['precheck', 'deploy']
+      block:
+
+        - name: Stat the new private key
+          ansible.builtin.stat:
+            path: "{{ identity_key_new }}"
+          register: identity_new_stat
+
+        # Генерация появится позже (identity_generate), пока пара кладётся руками
+        - name: New keypair is present on the controller
+          ansible.builtin.assert:
+            that: identity_new_stat.stat.exists
+            fail_msg: >
+              Нет новой пары {{ identity_key_new }}. Создай её на контроллере
+              от того же пользователя:
+              ssh-keygen -t ed25519 -N '' -C '{{ identity_key_comment_prefix }}-<дата>' -f {{ identity_key_new }}
+
+        - name: New private key is not readable by others
+          ansible.builtin.assert:
+            that: identity_new_stat.stat.mode in ['0600', '0400']
+            fail_msg: >
+              Права на {{ identity_key_new }} — {{ identity_new_stat.stat.mode }}.
+              Ожидается 0600. ssh откажется работать с таким ключом.
+
+        - name: Stat the new public key
+          ansible.builtin.stat:
+            path: "{{ identity_key_new }}.pub"
+          register: identity_new_pub_stat
+
+        - name: New public key is present
+          ansible.builtin.assert:
+            that: identity_new_pub_stat.stat.exists
+            fail_msg: "Нет {{ identity_key_new }}.pub рядом с приватным ключом."
+
+        # Половинки могли оказаться от разных пар — тогда стадия 3 упала бы
+        # уже после того, как ключ разъехался по парку
+        - name: Derive the public half from the new private key
+          ansible.builtin.command: "ssh-keygen -y -f {{ identity_key_new }}"
+          register: identity_derived
+          changed_when: false
+
+        - name: Private and public halves belong to the same pair
+          ansible.builtin.assert:
+            that: identity_derived.stdout.split()[0:2] == identity_new_pub_line.split()[0:2]
+            fail_msg: >
+              {{ identity_key_new }} и {{ identity_key_new }}.pub — от разных пар.
+
+        - name: Fingerprint the new key
+          ansible.builtin.command: "ssh-keygen -lf {{ identity_key_new }}.pub"
+          register: identity_new_fp_raw
+          changed_when: false
+
+        - name: Remember both fingerprints
+          ansible.builtin.set_fact:
+            identity_old_fp: "{{ identity_cur_fp_raw.stdout.split()[1] }}"
+            identity_new_fp: "{{ identity_new_fp_raw.stdout.split()[1] }}"
+            identity_old_pub_line: "{{ lookup('file', identity_key_current ~ '.pub') | trim }}"
+
+        - name: The new key differs from the current one
+          ansible.builtin.assert:
+            that: identity_old_fp != identity_new_fp
+            fail_msg: "Новый ключ совпадает с текущим — ротировать нечего."
+            success_msg: "OLD {{ identity_old_fp }} -> NEW {{ identity_new_fp }}"
+
+        # RouterOS кладёт comment в поле key-owner и только по нему отличает
+        # свежеимпортированный ключ от уже лежащих. Пустой comment ломает
+        # идемпотентность импорта на роутере.
+        - name: The new public key carries a comment
+          ansible.builtin.assert:
+            that:
+              - identity_new_pub_line.split(' ') | length > 2
+              - identity_new_pub_line.split(' ')[2] | trim | length > 0
+            fail_msg: >
+              У нового ключа пустой comment. Пересоздай пару с
+              -C '{{ identity_key_comment_prefix }}-<дата>'.
+
+    - name: Validate that deploy already happened
+      when: identity_phase == 'cleanup'
+      block:
+
+        - name: Stat the rotation state file
+          ansible.builtin.stat:
+            path: "{{ identity_state_file }}"
+          register: identity_state_stat
+
+        - name: Rotation state file is present
+          ansible.builtin.assert:
+            that: identity_state_stat.stat.exists
+            fail_msg: >
+              Нет {{ identity_state_file }} — фаза deploy не выполнялась.
+              Сначала прогони identity_phase=deploy.
+
+        - name: Load the rotation state
+          ansible.builtin.include_vars:
+            file: "{{ identity_state_file }}"
+            name: identity_state
+
+        - name: Previous phase was deploy
+          ansible.builtin.assert:
+            that: identity_state.phase == 'deploy'
+            fail_msg: >
+              В состоянии записана фаза '{{ identity_state.phase }}', ожидалась
+              'deploy'. Похоже, cleanup уже отработал.
+
+        # Ключевая проверка всего cleanup: контроллер уже ДОЛЖЕН ходить новым
+        # ключом. Если отпечаток не совпал — промоушен не случился, текущий
+        # прогон идёт СТАРЫМ ключом, и удалять OLD нельзя ни в коем случае.
+        - name: The controller already runs on the new key
+          ansible.builtin.assert:
+            that: identity_cur_fp_raw.stdout.split()[1] == identity_state.new_fp
+            fail_msg: >
+              {{ identity_key_current }} имеет отпечаток
+              {{ identity_cur_fp_raw.stdout.split()[1] }}, а в состоянии записан
+              новый {{ identity_state.new_fp }}. Значит прогон идёт старым
+              ключом — удалять OLD нельзя. Проверь, что фаза deploy дошла до
+              промоушена.
+            success_msg: "Контроллер ходит новым ключом {{ identity_state.new_fp }}"
+
+
+# ============================================================================
+# Play 1 — Стадия 1. server: [OLD]. Связь и предусловия, ничего не меняем.
+# ============================================================================
+
+- name: "Stage 1 - fleet is reachable and ready"
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+  vars:
+    # ровно одна группа — это гарантировано асертами play 0
+    identity_group: >-
+      {{ (group_names | intersect(hostvars['localhost'].identity_groups | default([])))
+         | first | default('', true) }}
+
+  pre_tasks:
+
+    # --limit отсекает и implicit localhost, то есть тихо выкидывает play 0
+    # вместе со всеми проверками. Для ротации ключа это недопустимо.
+    - name: The guards play actually ran
+      ansible.builtin.assert:
+        that: hostvars['localhost'].identity_groups is defined
+        fail_msg: >
+          Play с проверками не выполнялся. Почти наверняка прогон идёт с
+          --limit, который отсекает localhost вместе с play 0. Ротация
+          запускается только целиком, без --limit.
+
+    # Тот же --limit мог оставить в игре часть парка при том, что подсчёт
+    # групп в play 0 всё равно сошёлся бы: groups[] от --limit не зависит.
+    - name: Every host from all is in play
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == groups['all'] | length
+        fail_msg: >
+          В игре {{ ansible_play_hosts_all | length }} хостов из
+          {{ groups['all'] | length }}. Ротация идёт только по всему парку
+          сразу — иначе часть хостов останется со старым ключом.
+
+    - name: Host maps to exactly one covered group
+      ansible.builtin.assert:
+        that: identity_group | length > 0
+        fail_msg: "Для {{ inventory_hostname }} не нашлось файла задач группы."
+
+  tasks:
+    - name: "Check host readiness ({{ identity_group }})"
+      ansible.builtin.include_tasks: "tasks/{{ identity_group }}.yml"
+      vars:
+        identity_stage: check
+
+
+# ============================================================================
+# Play 2 — Стадия 2. server: [OLD, NEW]. NEW добавляется, OLD не трогаем.
+# ============================================================================
+
+- name: "Stage 2 - install the new key alongside the old one"
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+  vars:
+    identity_group: >-
+      {{ (group_names | intersect(hostvars['localhost'].identity_groups | default([])))
+         | first | default('', true) }}
+
+  pre_tasks:
+
+    # Барьер на границе play: хост, отвалившийся на предыдущей стадии, из игры
+    # выбывает молча. Для ротации это худший сценарий — часть парка осталась бы
+    # со старым ключом. Сверяем состав игры с inventory на каждой стадии.
+    - name: The whole fleet is still in play
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].identity_groups is defined
+          - ansible_play_hosts_all | length == groups['all'] | length
+          - identity_group | length > 0
+        fail_msg: >
+          В игре {{ ansible_play_hosts_all | length }} хостов из
+          {{ groups['all'] | length }}. Кто-то отвалился на предыдущей стадии
+          или прогон идёт с --limit. Стадия не начнётся.
+
+  tasks:
+    - name: "Install the new key ({{ identity_group }})"
+      ansible.builtin.include_tasks: "tasks/{{ identity_group }}.yml"
+      vars:
+        identity_stage: install
+      when: identity_phase == 'deploy'
+
+
+# ============================================================================
+# Play 3 — Стадия 3. Логин по NEW с контроллера. Ничего не меняем.
+# ============================================================================
+
+- name: "Stage 3 - verify login with the new key"
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+  vars:
+    identity_group: >-
+      {{ (group_names | intersect(hostvars['localhost'].identity_groups | default([])))
+         | first | default('', true) }}
+    # play целиком состоит из delegate_to: localhost. Интерпретатор Termux,
+    # приезжающий из group_vars/android.yml, на контроллере не существует.
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+  pre_tasks:
+
+    # Барьер на границе play: хост, отвалившийся на предыдущей стадии, из игры
+    # выбывает молча. Для ротации это худший сценарий — часть парка осталась бы
+    # со старым ключом. Сверяем состав игры с inventory на каждой стадии.
+    - name: The whole fleet is still in play
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].identity_groups is defined
+          - ansible_play_hosts_all | length == groups['all'] | length
+          - identity_group | length > 0
+        fail_msg: >
+          В игре {{ ansible_play_hosts_all | length }} хостов из
+          {{ groups['all'] | length }}. Кто-то отвалился на предыдущей стадии
+          или прогон идёт с --limit. Стадия не начнётся.
+
+  tasks:
+    - name: "Probe the new key ({{ identity_group }})"
+      ansible.builtin.include_tasks: "tasks/{{ identity_group }}.yml"
+      vars:
+        identity_stage: probe
+      when: identity_phase in ['deploy', 'cleanup']
+
+
+# ============================================================================
+# Play 4 — контроллер: бэкап OLD и промоушен NEW.
+# Сюда попадаем только потому, что стадия 3 прошла на ВСЕХ хостах.
+# ============================================================================
+
+- name: Back up the old key and promote the new one
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Promote on the controller
+      when: identity_phase == 'deploy'
+      block:
+
+        - name: Build the rotation stamp
+          ansible.builtin.set_fact:
+            identity_stamp: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
+
+        - name: Create the backup directory for this rotation
+          ansible.builtin.file:
+            path: "{{ identity_backup_root }}/{{ identity_stamp }}"
+            state: directory
+            mode: "0700"
+
+        # Старый приватный ключ сохраняется целиком: это единственный путь
+        # назад, если новый ключ окажется нерабочим на каком-то хосте.
+        - name: Back up the old keypair
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ identity_backup_root }}/{{ identity_stamp }}/{{ item.src | basename }}"
+            mode: "{{ item.mode }}"
+            remote_src: true
+          loop:
+            - { src: "{{ identity_key_current }}", mode: "0600" }
+            - { src: "{{ identity_key_current }}.pub", mode: "0644" }
+          loop_control:
+            label: "{{ item.src }}"
+
+        # pre_state собирается generically: каждый файл группы обязан выставить
+        # identity_pre_state на стадии check, что именно там лежит — дело группы.
+        - name: Write the rotation state
+          ansible.builtin.copy:
+            content: "{{ identity_state_new | to_nice_yaml(indent=2, width=1000) }}"
+            dest: "{{ identity_state_file }}"
+            mode: "0600"
+          vars:
+            identity_state_new:
+              stamp: "{{ identity_stamp }}"
+              phase: deploy
+              old_fp: "{{ identity_old_fp }}"
+              new_fp: "{{ identity_new_fp }}"
+              old_pub_line: "{{ identity_old_pub_line }}"
+              backup_dir: "{{ identity_backup_root }}/{{ identity_stamp }}"
+              pre_state: >-
+                {{ dict(groups['all'] | zip(groups['all']
+                   | map('extract', hostvars, 'identity_pre_state') | list)) }}
+
+        # Живой ключ подменяется ПОСЛЕДНИМ действием фазы deploy: следующий
+        # прогон Semaphore пойдёт уже новым ключом, а старый ещё лежит на всех
+        # хостах — то есть обратная дорога открыта.
+        - name: Promote the new keypair into place
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ item.dest }}"
+            mode: "{{ item.mode }}"
+            remote_src: true
+          loop:
+            - { src: "{{ identity_key_new }}", dest: "{{ identity_key_current }}", mode: "0600" }
+            - { src: "{{ identity_key_new }}.pub", dest: "{{ identity_key_current }}.pub", mode: "0644" }
+          loop_control:
+            label: "{{ item.dest }}"
+
+        - name: Drop the staged new keypair
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ identity_key_new }}"
+            - "{{ identity_key_new }}.pub"
+
+        # Журнал только дописывается. rotation-state.yml живёт один прогон и
+        # перезаписывается следующим, а здесь остаётся вся история: какой ключ
+        # когда сменился и в каком каталоге лежит его приватная половина.
+        - name: Append the rotation to the history log
+          ansible.builtin.lineinfile:
+            path: "{{ identity_history_file }}"
+            line: >-
+              {{ identity_stamp }}  deploy   old={{ identity_old_fp }}
+              new={{ identity_new_fp }}  backup={{ identity_backup_root }}/{{ identity_stamp }}
+            insertafter: EOF
+            create: true
+            mode: "0600"
+
+
+# ============================================================================
+# Play 5 — Стадия 4. server: [NEW]. OLD удаляется.
+# ============================================================================
+
+- name: "Stage 4 - remove the old key"
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+  vars:
+    identity_group: >-
+      {{ (group_names | intersect(hostvars['localhost'].identity_groups | default([])))
+         | first | default('', true) }}
+
+  pre_tasks:
+
+    # Барьер на границе play: хост, отвалившийся на предыдущей стадии, из игры
+    # выбывает молча. Для ротации это худший сценарий — часть парка осталась бы
+    # со старым ключом. Сверяем состав игры с inventory на каждой стадии.
+    - name: The whole fleet is still in play
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].identity_groups is defined
+          - ansible_play_hosts_all | length == groups['all'] | length
+          - identity_group | length > 0
+        fail_msg: >
+          В игре {{ ansible_play_hosts_all | length }} хостов из
+          {{ groups['all'] | length }}. Кто-то отвалился на предыдущей стадии
+          или прогон идёт с --limit. Стадия не начнётся.
+
+    # состояние читается на контроллере, хосту оно нужно ради mikrotik-id,
+    # записанных ещё в фазе deploy
+    - name: Load the rotation state
+      ansible.builtin.include_vars:
+        file: "{{ identity_state_file }}"
+        name: identity_state
+      when: identity_phase == 'cleanup'
+
+  tasks:
+    - name: "Remove the old key ({{ identity_group }})"
+      ansible.builtin.include_tasks: "tasks/{{ identity_group }}.yml"
+      vars:
+        identity_stage: cleanup
+      when: identity_phase == 'cleanup'
+
+
+# ============================================================================
+# Play 6 — контрольная проба после удаления OLD.
+# ============================================================================
+
+- name: "Stage 4 - verify the fleet still answers on the new key"
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/main.yml
+  vars:
+    identity_group: >-
+      {{ (group_names | intersect(hostvars['localhost'].identity_groups | default([])))
+         | first | default('', true) }}
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+  pre_tasks:
+
+    # Барьер на границе play: хост, отвалившийся на предыдущей стадии, из игры
+    # выбывает молча. Для ротации это худший сценарий — часть парка осталась бы
+    # со старым ключом. Сверяем состав игры с inventory на каждой стадии.
+    - name: The whole fleet is still in play
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].identity_groups is defined
+          - ansible_play_hosts_all | length == groups['all'] | length
+          - identity_group | length > 0
+        fail_msg: >
+          В игре {{ ansible_play_hosts_all | length }} хостов из
+          {{ groups['all'] | length }}. Кто-то отвалился на предыдущей стадии
+          или прогон идёт с --limit. Стадия не начнётся.
+
+  tasks:
+    - name: "Re-probe the new key ({{ identity_group }})"
+      ansible.builtin.include_tasks: "tasks/{{ identity_group }}.yml"
+      vars:
+        identity_stage: probe
+      when: identity_phase == 'cleanup'
+
+
+# ============================================================================
+# Play 7 — итог.
+# ============================================================================
+
+- name: Rotation summary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+
+    - name: Load the rotation state
+      ansible.builtin.include_vars:
+        file: "{{ identity_state_file }}"
+        name: identity_state
+      when: identity_phase == 'cleanup'
+
+    - name: Mark the rotation as finished
+      ansible.builtin.copy:
+        content: "{{ identity_state | combine({'phase': 'done'}) | to_nice_yaml(indent=2, width=1000) }}"
+        dest: "{{ identity_state_file }}"
+        mode: "0600"
+      when: identity_phase == 'cleanup'
+
+    # Строка cleanup появляется отдельно от deploy: по журналу видно не только
+    # что ротация была, но и довели ли её до удаления старого ключа.
+    - name: Append the cleanup to the history log
+      ansible.builtin.lineinfile:
+        path: "{{ identity_history_file }}"
+        line: >-
+          {{ identity_state.stamp }}  cleanup  old={{ identity_state.old_fp }} removed,
+          new={{ identity_state.new_fp }} in force
+        insertafter: EOF
+        create: true
+        mode: "0600"
+      when: identity_phase == 'cleanup'
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: |-
+          фаза:   {{ identity_phase }}
+          хостов: {{ groups['all'] | length }} ({{ groups['all'] | join(', ') }})
+          {% if identity_phase == 'precheck' %}
+          Ничего не менялось. Следующий шаг — identity_phase=deploy.
+          {% elif identity_phase == 'deploy' %}
+          На всех хостах теперь ДВА ключа: старый и новый, оба рабочие.
+          На контроллере:
+            новый ключ  {{ identity_key_current }} ({{ identity_new_fp }})
+            бэкап       {{ identity_backup_root }}/{{ identity_stamp }}
+          Следующий шаг — прогнать любой обычный плейбук (run.yml, target=all),
+          убедиться что Semaphore ходит новым ключом, и только потом
+          identity_phase=cleanup.
+          Откат: cp {{ identity_backup_root }}/{{ identity_stamp }}/id_ed25519* {{ identity_ssh_dir }}/
+          {% else %}
+          Ротация завершена, на хостах остался только новый ключ
+          {{ identity_state.new_fp }}.
+          Бэкап старого: {{ identity_state.backup_dir }}
+          Журнал ротаций: {{ identity_history_file }}
+          {% endif %}

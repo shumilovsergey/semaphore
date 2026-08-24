@@ -18,6 +18,8 @@ autossh_tunnels:
   - {name: prometheus-autossh, type: R, listen_port: 9090, dest_port: 9090, ssh_host: 45.131.41.34}
   - {name: buba-cloud-autossh, type: R, listen_port: 9102, dest_port: 9102, ssh_host: 45.131.41.34}
   - {name: youtrack-autossh, type: R, listen_port: 9999, dest_port: 9999, ssh_host: 45.131.41.34}
+  - {name: loki-autossh, type: R, listen_port: 9107, dest_port: 9107, ssh_host: 45.131.41.34}
+  - {name: grafana2-autossh, type: R, listen_port: 9108, dest_port: 9108, ssh_host: 45.131.41.34}
 
 
   
