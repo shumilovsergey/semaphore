@@ -27,7 +27,7 @@ nginx_sites:
   # privat
   - { name: semaphore, domain: semaphore.sh-development.ru, port: 9005, vpn_only: true }
   - { name: buba-cloud, domain: buba-cloud.sh-development.ru, port: 9102, vpn_only: true }
-  - { name: gitea, domain: gitea.sh-development.ru,   port: 9004, vpn_only: true }
+  - { name: gitea, domain: gitea.sh-development.ru, port: 9004, vpn_only: true }
   - { name: grafana, domain: grafana.sh-development.ru, port: 3000, vpn_only: true }
   - { name: prometheus, domain: prometheus.sh-development.ru, port: 9090, vpn_only: true }
   - { name: vault, domain: vault.sh-development.ru, port: 9000, vpn_only: true }
