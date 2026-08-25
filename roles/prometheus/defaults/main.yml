@@ -1,4 +1,4 @@
-prom_url: "http://10.10.30.165:9004/sh/s3/src/branch/main/bin/monitoring/prometheus/prometheus"
+prom_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/prometheus/prometheus"
 prom_path: "/opt/prometheus"
 prometheus_port: "9090"
 service_file_path: "/etc/systemd/system/prometheus.service"
@@ -8,3 +8,5 @@ bin_path: "{{ prom_path }}/prometheus"
 config_path: "{{ prom_path }}/prometheus.yml"
 data_path: "{{ prom_path }}/data"
 rules_path: "{{ prom_path }}/rules"
+
+
