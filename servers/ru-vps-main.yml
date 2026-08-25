@@ -4,6 +4,7 @@
 server_roles:
   - nginx_certbot
   - nft
+  - alloy
   - autossh_identity
 
 #---vars
@@ -42,3 +43,5 @@ nft_allow_input_extra:
   - { port: 35605, comment: "soks-tun" }
   - { port: 35152, comment: "awg-tun" }
 
+# -- alloy --------------------------
+alloy_snippets: [system, nginx]

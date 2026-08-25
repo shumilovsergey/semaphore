@@ -1,0 +1,26 @@
+// Журнал systemd целиком.
+loki.source.journal "system" {
+	forward_to    = [loki.write.default.receiver]
+	max_age       = "{{ alloy_journal_max_age }}"
+	relabel_rules = loki.relabel.journal.rules
+
+	labels = {
+		job = "systemd-journal",
+	}
+}
+
+// forward_to пустой: компонент нужен только как набор правил для
+// relabel_rules выше, сам он никуда не пишет.
+loki.relabel "journal" {
+	forward_to = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "unit"
+	}
+
+	rule {
+		source_labels = ["__journal_priority_keyword"]
+		target_label  = "level"
+	}
+}

@@ -1,0 +1,21 @@
+// Логи nginx. Читаются с диска: /var/log/nginx/* это root:adm 0640,
+// поэтому агент и ходит от root (см. service_user в defaults/main.yml).
+local.file_match "nginx" {
+	path_targets = [
+		{
+			__path__ = "{{ alloy_nginx_access_glob }}",
+			job      = "nginx",
+			log_type = "access",
+		},
+		{
+			__path__ = "{{ alloy_nginx_error_glob }}",
+			job      = "nginx",
+			log_type = "error",
+		},
+	]
+}
+
+loki.source.file "nginx" {
+	targets    = local.file_match.nginx.targets
+	forward_to = [loki.write.default.receiver]
+}

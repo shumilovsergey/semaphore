@@ -1,0 +1,25 @@
+// {{ ansible_managed }} — роль alloy, правки руками затрутся
+// Набор источников задаётся списком alloy_snippets в
+// servers/<hostname>.yml, каждый снипет — templates/snippets/<name>.alloy.j2
+
+logging {
+	level  = "{{ alloy_log_level }}"
+	format = "logfmt"
+}
+
+// Единственная точка выхода. Все снипеты пишут сюда через
+// loki.write.default.receiver, host проставляется здесь и один раз.
+loki.write "default" {
+	endpoint {
+		url = "{{ alloy_loki_url }}"
+	}
+
+	external_labels = {
+		host = "{{ inventory_hostname }}",
+	}
+}
+{% for snippet in alloy_snippets %}
+
+// ---------- {{ snippet }} ----------
+{% include 'snippets/' ~ snippet ~ '.alloy.j2' %}
+{% endfor %}
