@@ -5,6 +5,7 @@ server_roles:
   - prometheus
   - loki
   - grafana
+  - alloy
   - smtp_worker
   - node_exporter
   - autossh_identity
@@ -34,3 +35,6 @@ grafana_datasources:
 
 # -- loki ---------------------------
 loki_port: "9107"
+
+# -- alloy --------------------------
+alloy_snippets: [system]

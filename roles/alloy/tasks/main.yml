@@ -1,0 +1,158 @@
+- name: Fail if no snippets are selected
+  fail:
+    msg: >
+      alloy_snippets пуст — агент поднимется, но читать ему нечего.
+      Укажите список в servers/{{ inventory_hostname }}.yml, имена
+      берутся из roles/alloy/templates/snippets/.
+  when: alloy_snippets | length == 0
+
+- name: Create alloy directory
+  file:
+    path: "{{ alloy_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Check if service already exists
+  stat:
+    path: "{{ service_file_path }}"
+  register: service_file
+
+- name: Fail if port is already in use (first run only)
+  wait_for:
+    host: "{{ alloy_http_addr }}"
+    port: "{{ alloy_port }}"
+    state: stopped
+    timeout: 3
+  when: not service_file.stat.exists
+
+# --- бинарь: ставим только если версия на сервере отличается ---
+
+- name: Check installed binary
+  stat:
+    path: "{{ bin_path }}"
+  register: alloy_bin
+
+- name: Check installed version stamp
+  stat:
+    path: "{{ version_stamp_path }}"
+  register: alloy_stamp
+
+- name: Read installed version
+  slurp:
+    src: "{{ version_stamp_path }}"
+  register: alloy_stamp_content
+  when: alloy_stamp.stat.exists
+
+- name: Decide whether the binary must be installed
+  set_fact:
+    alloy_needs_install: "{{ not alloy_bin.stat.exists
+                             or not alloy_stamp.stat.exists
+                             or (alloy_stamp_content.content | b64decode | trim) != (alloy_version | string) }}"
+
+- name: Download alloy binary
+  get_url:
+    url: "{{ alloy_url }}"
+    dest: "{{ bin_path }}"
+    mode: "0755"
+    force: yes
+  when: alloy_needs_install | bool
+  notify: Restart alloy
+
+# --- каталоги, права, конфиг ---
+
+- name: Create alloy data directory
+  file:
+    path: "{{ data_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Set ownership on alloy directory
+  file:
+    path: "{{ alloy_path }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    recurse: yes
+
+# Снипеты собираются в один config.alloy — Alloy проверяет ссылки между
+# компонентами целиком, так что и валидировать нужно целиком.
+- name: Deploy alloy config
+  template:
+    src: config.alloy.j2
+    dest: "{{ config_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+    validate: "{{ bin_path }} validate %s"
+  notify: Restart alloy
+
+- name: Deploy systemd service file
+  template:
+    src: alloy.service.j2
+    dest: "{{ service_file_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: service_file_deployed
+  notify: Restart alloy
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: service_file_deployed.changed
+
+- name: Enable and start service (first run)
+  systemd:
+    name: alloy
+    state: started
+    enabled: yes
+  when: not service_file.stat.exists
+
+- name: Apply pending restart before health check
+  meta: flush_handlers
+
+# --- проверки ---
+
+- name: Wait for alloy to come up
+  wait_for:
+    host: "{{ alloy_http_addr }}"
+    port: "{{ alloy_port }}"
+    state: started
+    timeout: 30
+
+- name: Health check
+  uri:
+    url: "http://{{ alloy_http_addr }}:{{ alloy_port }}/-/ready"
+    status_code: 200
+  register: alloy_health
+  until: alloy_health.status == 200
+  retries: 10
+  delay: 2
+
+# /-/healthy падает, если компонент не смог подняться. Недоступный
+# Loki здоровье не роняет: loki.write копит и ретраит в фоне.
+- name: Check that all components are healthy
+  uri:
+    url: "http://{{ alloy_http_addr }}:{{ alloy_port }}/-/healthy"
+    status_code: 200
+  register: alloy_components
+  until: alloy_components.status == 200
+  retries: 5
+  delay: 2
+
+# Метку пишем последней: если что-то выше упало, следующий прогон
+# переустановит бинарь, а не решит что всё уже стоит.
+- name: Write installed version stamp
+  copy:
+    content: "{{ alloy_version }}\n"
+    dest: "{{ version_stamp_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+
+- name: Show alloy status
+  debug:
+    msg: >
+      alloy {{ alloy_version }} on {{ alloy_http_addr }}:{{ alloy_port }},
+      snippets: {{ alloy_snippets | join(', ') }},
+      -> {{ alloy_loki_url }}

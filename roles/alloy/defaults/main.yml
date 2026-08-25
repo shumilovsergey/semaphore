@@ -1,0 +1,34 @@
+alloy_version: "1.18.1"
+
+alloy_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/alloy/alloy"
+
+alloy_path: "/opt/alloy"
+alloy_http_addr: "127.0.0.1"
+alloy_port: "12345"
+alloy_log_level: "info"
+service_file_path: "/etc/systemd/system/alloy.service"
+
+# Читает чужие логи - даем много прав
+service_user: root
+
+bin_path: "{{ alloy_path }}/alloy"
+config_path: "{{ alloy_path }}/config.alloy"
+data_path: "{{ alloy_path }}/data"
+
+version_stamp_path: "{{ alloy_path }}/.installed_version"
+alloy_loki_url: "http://127.0.0.1:9107/loki/api/v1/push"
+
+# Какие снипеты собрать в config.alloy. Имя = файл в
+# templates/snippets/<name>.alloy.j2. Задаётся в servers/<hostname>.yml:
+#   alloy_snippets: [system, nginx]
+# Пустой список — агент поднимется, но не будет читать ничего.
+alloy_snippets: []
+
+# --- snippets/system.alloy.j2 ---
+# Насколько старые записи журнала забирать при первом старте.
+# Больше — при первом запуске зальёт в Loki всю историю разом.
+alloy_journal_max_age: "12h"
+
+# --- snippets/nginx.alloy.j2 ---
+alloy_nginx_access_glob: "/var/log/nginx/*access*.log"
+alloy_nginx_error_glob: "/var/log/nginx/*error*.log"
