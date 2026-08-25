@@ -1,4 +1,4 @@
-node_exporter_url: "http://10.10.30.165:9004/sh/s3/src/branch/main/bin/monitoring/node_exporter/node_exporter"
+node_exporter_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/node_exporter/node_exporter"
 node_exporter_path: "/opt/node_exporter"
 node_exporter_port: "9100"
 service_file_path: "/etc/systemd/system/node_exporter.service"
