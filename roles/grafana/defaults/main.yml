@@ -73,6 +73,9 @@ grafana_anonymous_enabled: false
 #   orgId          — по умолчанию grafana_datasource_org_id
 #   editable       — по умолчанию false
 #   database, user — если тип datasource их требует
+#   scrape_interval — "Min time interval" в UI, ложится в
+#                    jsonData.timeInterval; по умолчанию
+#                    grafana_datasource_scrape_interval
 #   jsonData       — словарь, любые настройки типа
 #   secureJsonData — словарь с секретами, значения брать из
 #                    Variable Group "creds" через lookup('env', ...)
@@ -82,6 +85,22 @@ grafana_anonymous_enabled: false
 # останется висеть в базе.
 grafana_datasources: []
 grafana_datasource_org_id: 1
+
+# Нижняя граница для $__interval в запросах. Держать равным scrape_interval
+# самого прометея (roles/prometheus/files/prometheus.config.yml — 60s):
+# если тут меньше, Grafana будет запрашивать интервалы мельче, чем в TSDB
+# реально есть точки, и графики поедут дырками. Пусто — дефолт Grafana (15s).
+# Перебивается на конкретном datasource ключом scrape_interval.
+grafana_datasource_scrape_interval: ""
+
+# Типы, которым timeInterval вообще что-то значит. Loki, например, в этот
+# список не входит: у него нет scrape-интервала, там ключ просто мусор.
+grafana_datasource_scrape_interval_types:
+  - prometheus
+  - influxdb
+  - elasticsearch
+  - graphite
+  - opentsdb
 
 datasources_path: "{{ provisioning_path }}/datasources/ansible.yaml"
 datasources_stamp_path: "{{ grafana_path }}/.provisioned_datasources"

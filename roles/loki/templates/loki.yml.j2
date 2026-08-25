@@ -1,0 +1,61 @@
+# {{ ansible_managed }} — роль loki, правки руками затрутся
+
+# Аутентификации нет by design: Loki слушает loopback, наружу его
+# отдаёт nginx с vpn_only.
+auth_enabled: false
+
+server:
+  http_listen_address: {{ loki_http_addr }}
+  http_listen_port: {{ loki_port }}
+  grpc_listen_address: {{ loki_http_addr }}
+  grpc_listen_port: {{ loki_grpc_port }}
+  log_level: {{ loki_log_level }}
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: {{ loki_path }}
+  # Одна нода — одна копия, кольцо держим в памяти
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: {{ chunks_path }}
+      rules_directory: {{ rules_path }}
+
+schema_config:
+  configs:
+    - from: {{ loki_schema_from }}
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: {{ index_path }}
+    cache_location: {{ cache_path }}
+
+# Без retention_enabled параметр retention_period ниже не работает
+compactor:
+  working_directory: {{ compactor_path }}
+  retention_enabled: true
+  delete_request_store: filesystem
+
+limits_config:
+  retention_period: {{ loki_retention_period }}
+  max_query_lookback: {{ loki_retention_period }}
+  reject_old_samples: true
+  reject_old_samples_max_age: {{ loki_reject_old_samples_max_age }}
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: {{ rules_path }}
+
+analytics:
+  reporting_enabled: false
