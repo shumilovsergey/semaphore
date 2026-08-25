@@ -1,0 +1,43 @@
+# {{ ansible_managed }} — роль grafana, правки руками затрутся
+# Источник — grafana_datasources в servers/<hostname>.yml
+apiVersion: 1
+{% if grafana_datasources_pruned | length > 0 %}
+
+# Выпали из grafana_datasources. Grafana применит удаление на старте,
+# дальше роль перестанет их сюда писать.
+deleteDatasources:
+{% for name in grafana_datasources_pruned %}
+  - name: "{{ name }}"
+    orgId: {{ grafana_datasource_org_id }}
+{% endfor %}
+{% endif %}
+
+{% if grafana_datasources | length == 0 %}
+datasources: []
+{% else %}
+datasources:
+{% for ds in grafana_datasources %}
+  - name: "{{ ds.name }}"
+    uid: "{{ ds.uid | default(ds.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')) }}"
+    type: "{{ ds.type }}"
+    access: "{{ ds.access | default('proxy') }}"
+    orgId: {{ ds.orgId | default(grafana_datasource_org_id) }}
+    url: "{{ ds.url }}"
+    isDefault: {{ ds.isDefault | default(false) | bool | lower }}
+    editable: {{ ds.editable | default(false) | bool | lower }}
+{% if ds.database is defined %}
+    database: "{{ ds.database }}"
+{% endif %}
+{% if ds.user is defined %}
+    user: "{{ ds.user }}"
+{% endif %}
+{% if ds.jsonData is defined %}
+    jsonData:
+{{ ds.jsonData | to_nice_yaml(indent=2) | trim | indent(6, true) }}
+{% endif %}
+{% if ds.secureJsonData is defined %}
+    secureJsonData:
+{{ ds.secureJsonData | to_nice_yaml(indent=2) | trim | indent(6, true) }}
+{% endif %}
+{% endfor %}
+{% endif %}
