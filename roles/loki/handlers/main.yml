@@ -1,0 +1,4 @@
+- name: Restart loki
+  systemd:
+    name: loki
+    state: restarted

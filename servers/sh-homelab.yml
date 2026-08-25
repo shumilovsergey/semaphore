@@ -3,6 +3,7 @@
 #---roles
 server_roles:
   - prometheus
+  - loki
   - grafana
   - smtp_worker
   - node_exporter
@@ -28,5 +29,8 @@ autossh_tunnels:
 grafana_port: "9108"
 grafana_root_url: "https://grafana2.sh-development.ru"
 grafana_datasources:
-  - {name: prometheus, type: prometheus, url: "http://127.0.0.1:9090", isDefault: true}
+  - {name: prometheus, type: prometheus, url: "http://127.0.0.1:9090", isDefault: true, scrape_interval: "60s"}
   - {name: loki, type: loki, url: "http://127.0.0.1:9107"}
+
+# -- loki ---------------------------
+loki_port: "9107"

@@ -1,0 +1,38 @@
+
+loki_version: "3.7.6"
+
+loki_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/loki/loki"
+
+loki_path: "/opt/loki"
+loki_port: "3100"
+loki_http_addr: "127.0.0.1"
+
+# grpc нужен самому Loki для внутренних вызовов даже в одиночном режиме
+loki_grpc_port: "9096"
+loki_log_level: "info"
+
+service_file_path: "/etc/systemd/system/loki.service"
+service_user: service_ansible
+
+bin_path: "{{ loki_path }}/loki"
+config_path: "{{ loki_path }}/loki.yml"
+chunks_path: "{{ loki_path }}/chunks"
+rules_path: "{{ loki_path }}/rules"
+compactor_path: "{{ loki_path }}/compactor"
+index_path: "{{ loki_path }}/tsdb-index"
+cache_path: "{{ loki_path }}/tsdb-cache"
+
+version_stamp_path: "{{ loki_path }}/.installed_version"
+
+# Сколько держим логи. Чистит compactor, он же включён ниже в шаблоне —
+# без retention_enabled этот параметр молча ничего не делает.
+loki_retention_period: "150h"
+
+# Логи старше этого Loki откажется принимать. Меньше retention_period,
+# иначе push-и с отставшего хоста будут молча отлетать.
+loki_reject_old_samples_max_age: "48h"
+
+# Дата, с которой действует схема индекса. Менять ПОСЛЕ того как в Loki
+# появились данные нельзя: старые чанки перестанут читаться. Новая схема
+# добавляется вторым элементом в schema_config с датой в будущем.
+loki_schema_from: "2024-01-01"

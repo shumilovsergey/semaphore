@@ -17,6 +17,10 @@ datasources: []
 {% else %}
 datasources:
 {% for ds in grafana_datasources %}
+{#- scrape_interval -> jsonData.timeInterval. Явный jsonData важнее: он
+    нижний уровень, из него можно перебить всё остальное. -#}
+{% set ds_interval = (ds.scrape_interval | default(grafana_datasource_scrape_interval if ds.type in grafana_datasource_scrape_interval_types else '', true)) | string %}
+{% set ds_json = ({'timeInterval': ds_interval} if ds_interval | length > 0 else {}) | combine(ds.jsonData | default({})) %}
   - name: "{{ ds.name }}"
     uid: "{{ ds.uid | default(ds.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')) }}"
     type: "{{ ds.type }}"
@@ -31,9 +35,9 @@ datasources:
 {% if ds.user is defined %}
     user: "{{ ds.user }}"
 {% endif %}
-{% if ds.jsonData is defined %}
+{% if ds_json | length > 0 %}
     jsonData:
-{{ ds.jsonData | to_nice_yaml(indent=2) | trim | indent(6, true) }}
+{{ ds_json | to_nice_yaml(indent=2) | trim | indent(6, true) }}
 {% endif %}
 {% if ds.secureJsonData is defined %}
     secureJsonData:

@@ -1,0 +1,153 @@
+- name: Guard — only one host allowed
+  fail:
+    msg: "This role must target exactly one host, got: {{ ansible_play_hosts | join(', ') }}"
+  when: ansible_play_hosts | length > 1
+  run_once: true
+
+- name: Create loki directory
+  file:
+    path: "{{ loki_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Check if service already exists
+  stat:
+    path: "{{ service_file_path }}"
+  register: service_file
+
+- name: Fail if port is already in use (first run only)
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    state: stopped
+    timeout: 3
+  loop:
+    - "{{ loki_port }}"
+    - "{{ loki_grpc_port }}"
+  when: not service_file.stat.exists
+
+# --- бинарь: ставим только если версия на сервере отличается ---
+
+- name: Check installed binary
+  stat:
+    path: "{{ bin_path }}"
+  register: loki_bin
+
+- name: Check installed version stamp
+  stat:
+    path: "{{ version_stamp_path }}"
+  register: loki_stamp
+
+- name: Read installed version
+  slurp:
+    src: "{{ version_stamp_path }}"
+  register: loki_stamp_content
+  when: loki_stamp.stat.exists
+
+- name: Decide whether the binary must be installed
+  set_fact:
+    loki_needs_install: "{{ not loki_bin.stat.exists
+                            or not loki_stamp.stat.exists
+                            or (loki_stamp_content.content | b64decode | trim) != (loki_version | string) }}"
+
+- name: Download loki binary
+  get_url:
+    url: "{{ loki_url }}"
+    dest: "{{ bin_path }}"
+    mode: "0755"
+    force: yes
+  when: loki_needs_install | bool
+  notify: Restart loki
+
+# --- каталоги, права, конфиг ---
+
+- name: Create loki directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ chunks_path }}"
+    - "{{ rules_path }}"
+    - "{{ compactor_path }}"
+    - "{{ index_path }}"
+    - "{{ cache_path }}"
+
+- name: Set ownership on loki directories
+  file:
+    path: "{{ loki_path }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    recurse: yes
+
+- name: Deploy loki config
+  template:
+    src: loki.yml.j2
+    dest: "{{ config_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+    validate: "{{ bin_path }} -config.file=%s -verify-config"
+  notify: Restart loki
+
+- name: Deploy systemd service file
+  template:
+    src: loki.service.j2
+    dest: "{{ service_file_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: service_file_deployed
+  notify: Restart loki
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: service_file_deployed.changed
+
+- name: Enable and start service (first run)
+  systemd:
+    name: loki
+    state: started
+    enabled: yes
+  when: not service_file.stat.exists
+
+- name: Apply pending restart before health check
+  meta: flush_handlers
+
+# --- проверки ---
+
+- name: Wait for loki to come up
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ loki_port }}"
+    state: started
+    timeout: 30
+
+# /ready отдаёт 503 пока ingester не прогрелся — это штатные ~15 секунд
+- name: Health check
+  uri:
+    url: "http://127.0.0.1:{{ loki_port }}/ready"
+    status_code: 200
+  register: loki_health
+  until: loki_health.status == 200
+  retries: 20
+  delay: 3
+
+# Метку пишем последней: если что-то выше упало, следующий прогон
+# переустановит бинарь, а не решит что всё уже стоит.
+- name: Write installed version stamp
+  copy:
+    content: "{{ loki_version }}\n"
+    dest: "{{ version_stamp_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+
+- name: Show loki status
+  debug:
+    msg: >
+      loki {{ loki_version }} on {{ loki_http_addr }}:{{ loki_port }},
+      storage filesystem ({{ loki_path }}),
+      retention {{ loki_retention_period }}
