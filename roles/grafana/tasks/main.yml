@@ -1,0 +1,229 @@
+# Проверка — Variable Group "creds" не подключена к шаблону
+- name: Fail if admin password is empty
+  fail:
+    msg: >
+      SH_ADMIN_GRAFANA_PASSWORD is empty — подключите Variable Group 'creds'
+      к шаблону задачи в Semaphore (см. roles/grafana/defaults/main.yml).
+  when: grafana_admin_password | default('') | length == 0
+
+- name: Create grafana directory
+  file:
+    path: "{{ grafana_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Check if service already exists
+  stat:
+    path: "{{ service_file_path }}"
+  register: service_file
+
+- name: Fail if port is already in use (first run only)
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ grafana_port }}"
+    state: stopped
+    timeout: 3
+  when: not service_file.stat.exists
+
+# --- установка артефактов: только если версия на сервере отличается ---
+
+- name: Check installed binary
+  stat:
+    path: "{{ bin_path }}"
+  register: grafana_bin
+
+- name: Check installed version stamp
+  stat:
+    path: "{{ version_stamp_path }}"
+  register: grafana_stamp
+
+- name: Read installed version
+  slurp:
+    src: "{{ version_stamp_path }}"
+  register: grafana_stamp_content
+  when: grafana_stamp.stat.exists
+
+- name: Decide whether artifacts must be installed
+  set_fact:
+    grafana_needs_install: "{{ not grafana_bin.stat.exists
+                               or not grafana_stamp.stat.exists
+                               or (grafana_stamp_content.content | b64decode | trim) != (grafana_version | string) }}"
+
+- name: Download grafana binary
+  get_url:
+    url: "{{ grafana_url }}"
+    dest: "{{ bin_path }}"
+    mode: "0755"
+    force: yes
+  when: grafana_needs_install | bool
+  notify: Restart grafana
+
+- name: Download grafana homepath archive
+  get_url:
+    url: "{{ grafana_homepath_url }}"
+    dest: "{{ archive_path }}"
+    mode: "0644"
+    force: yes
+  when: grafana_needs_install | bool
+
+# Чистим старые public/ и conf/defaults.ini, чтобы от прошлой версии
+# не осталось файлов, которых в новой уже нет. grafana.ini не трогаем:
+# он не из архива, его шаблонит роль ниже.
+- name: Remove stale homepath assets
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ grafana_path }}/public"
+    - "{{ grafana_path }}/conf/defaults.ini"
+  when: grafana_needs_install | bool
+
+- name: Unpack grafana homepath archive
+  unarchive:
+    src: "{{ archive_path }}"
+    dest: "{{ grafana_path }}"
+    remote_src: yes
+  when: grafana_needs_install | bool
+  notify: Restart grafana
+
+# Архив под 400 МБ, держать его на диске незачем
+- name: Remove grafana homepath archive
+  file:
+    path: "{{ archive_path }}"
+    state: absent
+
+- name: Check homepath assets
+  stat:
+    path: "{{ item }}"
+  register: grafana_homepath_check
+  loop:
+    - "{{ grafana_path }}/public"
+    - "{{ grafana_path }}/conf/defaults.ini"
+
+- name: Fail if homepath is incomplete
+  fail:
+    msg: >
+      Нет {{ grafana_homepath_check.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+      — без public/ и conf/defaults.ini бинарь не стартует.
+      Проверьте, что grafana-homepath.tar.gz выложен в Gitea
+      ({{ grafana_homepath_url }}) и собран через roles/grafana/files/download.sh.
+  when: grafana_homepath_check.results | rejectattr('stat.exists') | list | length > 0
+
+# --- каталоги, права, конфиг ---
+
+- name: Create grafana runtime directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ data_path }}"
+    - "{{ logs_path }}"
+    - "{{ plugins_path }}"
+    - "{{ provisioning_path }}"
+    - "{{ provisioning_path }}/datasources"
+    - "{{ provisioning_path }}/dashboards"
+    - "{{ provisioning_path }}/plugins"
+    - "{{ provisioning_path }}/alerting"
+
+- name: Set ownership on grafana directory
+  file:
+    path: "{{ grafana_path }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    recurse: yes
+
+# В конфиге пароль админа — отсюда 0640 и no_log: логи задач в Semaphore
+# видит любой, у кого есть доступ к проекту.
+- name: Deploy grafana config
+  template:
+    src: grafana.ini.j2
+    dest: "{{ config_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart grafana
+
+- name: Deploy systemd service file
+  template:
+    src: grafana.service.j2
+    dest: "{{ service_file_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: service_file_deployed
+  notify: Restart grafana
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: service_file_deployed.changed
+
+- name: Enable and start service (first run)
+  systemd:
+    name: grafana
+    state: started
+    enabled: yes
+  when: not service_file.stat.exists
+
+- name: Apply pending restart before health check
+  meta: flush_handlers
+
+# --- проверки ---
+
+- name: Wait for grafana to come up
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ grafana_port }}"
+    state: started
+    timeout: 60
+
+# На первом запуске Grafana ещё катает миграции sqlite и отдаёт 503
+- name: Health check
+  uri:
+    url: "http://127.0.0.1:{{ grafana_port }}/api/health"
+    status_code: 200
+  register: grafana_health
+  until: grafana_health.status == 200
+  retries: 15
+  delay: 2
+
+- name: Verify admin credentials
+  uri:
+    url: "http://127.0.0.1:{{ grafana_port }}/api/user"
+    user: "{{ grafana_admin_user }}"
+    password: "{{ grafana_admin_password }}"
+    force_basic_auth: yes
+    status_code: [200, 401]
+  register: grafana_admin_check
+  no_log: true
+
+- name: Fail if admin credentials do not work
+  fail:
+    msg: >
+      Grafana не пускает {{ grafana_admin_user }} с паролем из
+      SH_ADMIN_GRAFANA_PASSWORD. admin_password из конфига применяется
+      только при создании базы — дальше пароль живёт в
+      {{ data_path }}/{{ grafana_db_name }}. Как сменить — в
+      roles/grafana/defaults/main.yml.
+  when: grafana_admin_check.status != 200
+
+# Метку пишем последней: если что-то выше упало, следующий прогон
+# переустановит артефакты, а не решит что всё уже стоит.
+- name: Write installed version stamp
+  copy:
+    content: "{{ grafana_version }}\n"
+    dest: "{{ version_stamp_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+
+- name: Show grafana status
+  debug:
+    msg: >
+      grafana {{ grafana_health.json.version | default(grafana_version) }}
+      on {{ grafana_http_addr }}:{{ grafana_port }},
+      db {{ grafana_db_type }} ({{ grafana_health.json.database | default('?') }}),
+      admin {{ grafana_admin_user }}

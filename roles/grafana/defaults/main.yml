@@ -1,0 +1,51 @@
+
+grafana_version: "13.1.3"
+
+grafana_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/grafana/grafana"
+grafana_homepath_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/grafana/grafana-homepath.tar.gz"
+
+grafana_path: "/opt/grafana"
+grafana_port: "3000"
+grafana_http_addr: "127.0.0.1"
+
+# ---- change !
+grafana_root_url: "dont-forget-to-change"
+# --------
+
+service_file_path: "/etc/systemd/system/grafana.service"
+service_user: service_ansible
+
+bin_path: "{{ grafana_path }}/grafana"
+config_path: "{{ grafana_path }}/conf/grafana.ini"
+data_path: "{{ grafana_path }}/data"
+logs_path: "{{ grafana_path }}/logs"
+plugins_path: "{{ grafana_path }}/plugins"
+provisioning_path: "{{ grafana_path }}/provisioning"
+
+version_stamp_path: "{{ grafana_path }}/.installed_version"
+archive_path: "{{ grafana_path }}/.homepath.tar.gz"
+
+
+grafana_db_type: "sqlite3"
+grafana_db_name: "grafana.db"
+
+
+#----USER
+grafana_admin_user: "sh"
+grafana_admin_password: "{{ lookup('env', 'SH_ADMIN_GRAFANA_PASSWORD') }}"
+
+
+# ВАЖНО про ротацию пароля.
+# admin_password из конфига применяется ОДИН раз — когда Grafana создаёт
+# базу и в ней ещё нет админа. Дальше пароль живёт в sqlite, и правка
+# конфига его не меняет. Роль это проверяет (задача "Verify admin
+# credentials") и падает с объяснением, а не делает вид что всё хорошо.
+# Сменить пароль:
+#   1) поменять SH_ADMIN_GRAFANA_PASSWORD в Variable Group "creds"
+#   2) на сервере: sudo -u service_ansible /opt/grafana/grafana cli \
+#        --homepath /opt/grafana --config /opt/grafana/conf/grafana.ini \
+#        admin reset-admin-password '<новый пароль>'
+#   3) прогнать роль — она проверит, что пароль совпал
+
+grafana_allow_sign_up: false
+grafana_anonymous_enabled: false
