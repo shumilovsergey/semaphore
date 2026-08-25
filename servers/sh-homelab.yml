@@ -3,12 +3,14 @@
 #---roles
 server_roles:
   - prometheus
+  - grafana
   - smtp_worker
   - node_exporter
   - autossh_identity
   - autossh
 
 #---vars
+
 autossh_tunnels:
   - {name: grafana-autossh, type: R, listen_port: 3000, dest_port: 3000, ssh_host: 45.131.41.34}
   - {name: semaphore-autossh, type: R, listen_port: 9005, dest_port: 9005, ssh_host: 45.131.41.34}
@@ -22,4 +24,5 @@ autossh_tunnels:
   - {name: grafana2-autossh, type: R, listen_port: 9108, dest_port: 9108, ssh_host: 45.131.41.34}
 
 
-  
+grafana_port: "9108"
+grafana_root_url: "https://grafana2.sh-development.ru"
