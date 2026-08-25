@@ -49,3 +49,39 @@ grafana_admin_password: "{{ lookup('env', 'SH_ADMIN_GRAFANA_PASSWORD') }}"
 
 grafana_allow_sign_up: false
 grafana_anonymous_enabled: false
+
+# --- provisioning ---
+
+# Datasources заводятся файлом, а не руками в UI: Grafana при старте
+# читает provisioning/datasources/*.yaml. editable: false — в UI их не
+# поправить, единственный источник правды здесь.
+#
+# Заполняется в servers/<hostname>.yml, порядок значения не имеет:
+# grafana_datasources:
+#   - name: Prometheus
+#     type: prometheus
+#     url: "http://127.0.0.1:9090"
+#     isDefault: true
+#   - name: Loki
+#     type: loki
+#     url: "http://127.0.0.1:9107"
+#
+# Обязательны только name, type, url. Необязательные ключи:
+#   uid            — по умолчанию из name ("Prometheus" -> "prometheus"),
+#                    на него ссылаются дашборды, так что менять его потом больно
+#   access         — proxy (по умолчанию) | direct
+#   orgId          — по умолчанию grafana_datasource_org_id
+#   editable       — по умолчанию false
+#   database, user — если тип datasource их требует
+#   jsonData       — словарь, любые настройки типа
+#   secureJsonData — словарь с секретами, значения брать из
+#                    Variable Group "creds" через lookup('env', ...)
+#
+# Убрали datasource из списка — роль допишет его в deleteDatasources.
+# Само по себе исчезновение из файла Grafana не трогает, запись
+# останется висеть в базе.
+grafana_datasources: []
+grafana_datasource_org_id: 1
+
+datasources_path: "{{ provisioning_path }}/datasources/ansible.yaml"
+datasources_stamp_path: "{{ grafana_path }}/.provisioned_datasources"

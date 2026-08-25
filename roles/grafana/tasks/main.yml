@@ -146,6 +146,37 @@
   no_log: true
   notify: Restart grafana
 
+# --- provisioning: datasources ---
+
+- name: Check provisioned datasources stamp
+  stat:
+    path: "{{ datasources_stamp_path }}"
+  register: grafana_ds_stamp
+
+- name: Read provisioned datasources stamp
+  slurp:
+    src: "{{ datasources_stamp_path }}"
+  register: grafana_ds_stamp_content
+  when: grafana_ds_stamp.stat.exists
+
+# Что роль заводила в прошлый раз, но чего больше нет в grafana_datasources
+- name: Decide which datasources to prune
+  set_fact:
+    grafana_datasources_pruned: "{{ grafana_ds_previous | difference(grafana_datasources | map(attribute='name') | list) }}"
+  vars:
+    grafana_ds_previous: "{{ ((grafana_ds_stamp_content.content | b64decode).splitlines() | select | list) if grafana_ds_stamp.stat.exists else [] }}"
+
+# secureJsonData может содержать токены — отсюда 0640 и no_log
+- name: Deploy datasources provisioning
+  template:
+    src: datasources.yaml.j2
+    dest: "{{ datasources_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart grafana
+
 - name: Deploy systemd service file
   template:
     src: grafana.service.j2
@@ -210,6 +241,39 @@
       roles/grafana/defaults/main.yml.
   when: grafana_admin_check.status != 200
 
+- name: Read datasources back from grafana
+  uri:
+    url: "http://127.0.0.1:{{ grafana_port }}/api/datasources"
+    user: "{{ grafana_admin_user }}"
+    password: "{{ grafana_admin_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  register: grafana_ds_check
+  no_log: true
+  when: grafana_datasources | length > 0
+
+- name: Fail if a datasource was not provisioned
+  fail:
+    msg: >
+      Grafana не видит datasource: {{ grafana_datasources | map(attribute='name') | list
+                                      | difference(grafana_ds_check.json | map(attribute='name') | list) | join(', ') }}.
+      Смотрите {{ logs_path }}/grafana.log — Grafana молча пропускает
+      provisioning-файл, если в нём кривой YAML или неизвестный type.
+  when:
+    - grafana_datasources | length > 0
+    - grafana_datasources | map(attribute='name') | list
+      | difference(grafana_ds_check.json | map(attribute='name') | list) | length > 0
+
+# Пишем после проверки: если datasource не поднялся, следующий прогон
+# должен считать его всё ещё "прошлым", а не потерять из вида
+- name: Write provisioned datasources stamp
+  copy:
+    content: "{{ grafana_datasources | map(attribute='name') | join('\n') }}\n"
+    dest: "{{ datasources_stamp_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+
 # Метку пишем последней: если что-то выше упало, следующий прогон
 # переустановит артефакты, а не решит что всё уже стоит.
 - name: Write installed version stamp
@@ -226,4 +290,5 @@
       grafana {{ grafana_health.json.version | default(grafana_version) }}
       on {{ grafana_http_addr }}:{{ grafana_port }},
       db {{ grafana_db_type }} ({{ grafana_health.json.database | default('?') }}),
-      admin {{ grafana_admin_user }}
+      admin {{ grafana_admin_user }},
+      datasources: {{ grafana_datasources | map(attribute='name') | join(', ') | default('none', true) }}
