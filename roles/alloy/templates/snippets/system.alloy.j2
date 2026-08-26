@@ -1,6 +1,6 @@
 // Журнал systemd целиком.
 loki.source.journal "system" {
-	forward_to    = [loki.write.default.receiver]
+	forward_to    = [loki.process.filter.receiver]
 	max_age       = "{{ alloy_journal_max_age }}"
 	relabel_rules = loki.relabel.journal.rules
 

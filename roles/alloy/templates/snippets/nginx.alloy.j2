@@ -17,5 +17,5 @@ local.file_match "nginx" {
 
 loki.source.file "nginx" {
 	targets    = local.file_match.nginx.targets
-	forward_to = [loki.write.default.receiver]
+	forward_to = [loki.process.filter.receiver]
 }
