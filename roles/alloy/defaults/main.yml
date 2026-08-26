@@ -2,6 +2,17 @@ alloy_version: "1.18.1"
 
 alloy_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/alloy/alloy"
 
+# Бинарь НЕ качается с хоста напрямую: Gitea живёт в сети homelab и с vps
+# недоступна. Качает контроллер (он в той же сети) и раздаёт файл по ssh —
+# до самого хоста ansible дотягивается по определению, иначе он бы туда
+# не пришёл. Работает одинаково для vps, homelab и всего остального.
+#
+# Имя файла в кеше содержит версию, поэтому get_url без force сам ничего
+# не перекачивает: есть файл — значит нужная версия уже лежит. Старые
+# версии остаются в кеше, чистить руками.
+alloy_cache_dir: "/var/tmp/ansible-bin-cache"
+alloy_cache_path: "{{ alloy_cache_dir }}/alloy-{{ alloy_version }}"
+
 alloy_path: "/opt/alloy"
 alloy_http_addr: "127.0.0.1"
 alloy_port: "12345"
