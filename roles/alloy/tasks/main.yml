@@ -49,12 +49,30 @@
                              or not alloy_stamp.stat.exists
                              or (alloy_stamp_content.content | b64decode | trim) != (alloy_version | string) }}"
 
-- name: Download alloy binary
+# Кеш на контроллере наполняем безусловно: если файл нужной версии уже
+# лежит, get_url не ходит в сеть вообще, а условие тут сломало бы run_once
+# на прогоне, где первому хосту обновление не нужно, а второму нужно.
+- name: Create binary cache directory on the controller
+  file:
+    path: "{{ alloy_cache_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: Cache alloy binary on the controller
   get_url:
     url: "{{ alloy_url }}"
+    dest: "{{ alloy_cache_path }}"
+    mode: "0644"
+  delegate_to: localhost
+  run_once: true
+
+- name: Upload alloy binary to the host
+  copy:
+    src: "{{ alloy_cache_path }}"
     dest: "{{ bin_path }}"
     mode: "0755"
-    force: yes
   when: alloy_needs_install | bool
   notify: Restart alloy
 
