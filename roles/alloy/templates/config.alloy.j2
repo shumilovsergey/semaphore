@@ -7,8 +7,7 @@ logging {
 	format = "logfmt"
 }
 
-// Единственная точка выхода. Все снипеты пишут сюда через
-// loki.write.default.receiver, host проставляется здесь и один раз.
+// Единственная точка выхода. host проставляется здесь и один раз.
 loki.write "default" {
 	endpoint {
 		url = "{{ alloy_loki_url }}"
@@ -17,6 +16,25 @@ loki.write "default" {
 	external_labels = {
 		host = "{{ inventory_hostname }}",
 	}
+}
+
+// Общий фильтр. Снипеты шлют сюда, а не в loki.write напрямую, поэтому
+// alloy_keep_expressions действует сразу на все источники.
+// Пустой список — компонент остаётся, но ничего не делает.
+// Селектор опирается на метку job: её обязан ставить каждый снипет.
+// Счётчик отброшенного: loki_process_dropped_lines_total.
+loki.process "filter" {
+	forward_to = [loki.write.default.receiver]
+{% if alloy_keep_expressions | length > 0 %}
+{% set keep_re = '(?:' ~ alloy_keep_expressions | join(')|(?:') ~ ')' %}
+
+	stage.match {
+		selector = `{job=~".+"} !~ "{{ keep_re }}"`
+		action   = "drop"
+
+		drop_counter_reason = "not_in_keep_list"
+	}
+{% endif %}
 }
 {% for snippet in alloy_snippets %}
 

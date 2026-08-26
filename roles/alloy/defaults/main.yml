@@ -2,14 +2,6 @@ alloy_version: "1.18.1"
 
 alloy_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/alloy/alloy"
 
-# Бинарь НЕ качается с хоста напрямую: Gitea живёт в сети homelab и с vps
-# недоступна. Качает контроллер (он в той же сети) и раздаёт файл по ssh —
-# до самого хоста ansible дотягивается по определению, иначе он бы туда
-# не пришёл. Работает одинаково для vps, homelab и всего остального.
-#
-# Имя файла в кеше содержит версию, поэтому get_url без force сам ничего
-# не перекачивает: есть файл — значит нужная версия уже лежит. Старые
-# версии остаются в кеше, чистить руками.
 alloy_cache_dir: "/var/tmp/ansible-bin-cache"
 alloy_cache_path: "{{ alloy_cache_dir }}/alloy-{{ alloy_version }}"
 
@@ -43,3 +35,10 @@ alloy_journal_max_age: "12h"
 # --- snippets/nginx.alloy.j2 ---
 alloy_nginx_access_glob: "/var/log/nginx/*access*.log"
 alloy_nginx_error_glob: "/var/log/nginx/*error*.log"
+
+# --- фильтр, общий для всех снипетов ---
+alloy_keep_expressions: []
+# белый список: совпало = попало, всё остальное отбрасывается
+  # alloy_keep_expressions:
+  #   - '" (4|5)[0-9][0-9] '      все 4xx/5xx
+  #   - "Mozilla"                 живые браузеры
