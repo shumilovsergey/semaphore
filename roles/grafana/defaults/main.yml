@@ -104,3 +104,9 @@ grafana_datasource_scrape_interval_types:
 
 datasources_path: "{{ provisioning_path }}/datasources/ansible.yaml"
 datasources_stamp_path: "{{ grafana_path }}/.provisioned_datasources"
+
+# Артефакты не качаются с хоста: Gitea видна только из сети homelab.
+# Качает контроллер и раздаёт по ssh — RULES.md #5.
+grafana_cache_dir: "/var/tmp/ansible-bin-cache"
+grafana_cache_path: "{{ grafana_cache_dir }}/grafana-{{ grafana_version }}"
+grafana_homepath_cache_path: "{{ grafana_cache_dir }}/grafana-homepath-{{ grafana_version }}.tar.gz"

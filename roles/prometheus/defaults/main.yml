@@ -1,3 +1,4 @@
+prom_version: "3.14.0"
 prom_url: "http://10.10.30.165:9004/sh/s3/raw/branch/main/bin/monitoring/prometheus/prometheus"
 prom_path: "/opt/prometheus"
 prometheus_port: "9090"
@@ -8,5 +9,8 @@ bin_path: "{{ prom_path }}/prometheus"
 config_path: "{{ prom_path }}/prometheus.yml"
 data_path: "{{ prom_path }}/data"
 rules_path: "{{ prom_path }}/rules"
-
-
+# Бинарь не качается с хоста: артефакт лежит в Gitea, а она видна только
+# из сети homelab. Качает контроллер и раздаёт по ssh — RULES.md #5.
+# Версия в имени файла: новая версия — новый файл, старый не перекачивается.
+prom_cache_dir: "/var/tmp/ansible-bin-cache"
+prom_cache_path: "{{ prom_cache_dir }}/prometheus-{{ prom_version }}"

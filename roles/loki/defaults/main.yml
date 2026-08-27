@@ -36,3 +36,8 @@ loki_reject_old_samples_max_age: "48h"
 # появились данные нельзя: старые чанки перестанут читаться. Новая схема
 # добавляется вторым элементом в schema_config с датой в будущем.
 loki_schema_from: "2024-01-01"
+
+# Бинарь не качается с хоста: артефакт лежит в Gitea, а она видна только
+# из сети homelab. Качает контроллер и раздаёт по ssh — RULES.md #5.
+loki_cache_dir: "/var/tmp/ansible-bin-cache"
+loki_cache_path: "{{ loki_cache_dir }}/loki-{{ loki_version }}"
