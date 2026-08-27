@@ -47,7 +47,8 @@ nft_allow_input_extra:
 alloy_snippets: [system, nginx]
 
 alloy_keep_expressions:
+  # ssh
   - "Accepted (publickey|password) for"
-  - "session opened for user"
+
 
 

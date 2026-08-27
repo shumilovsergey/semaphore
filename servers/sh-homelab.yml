@@ -40,7 +40,8 @@ loki_port: "9107"
 alloy_snippets: [system]
 
 alloy_keep_expressions:
+  # ssh
   - "Accepted (publickey|password) for"
-  - "session opened for user"
+
 
   
