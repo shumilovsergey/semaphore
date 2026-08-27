@@ -37,11 +37,20 @@ grafana_datasources:
 loki_port: "9107"
 
 # -- alloy --------------------------
-alloy_snippets: [system]
+alloy_snippets: [system, ansible]
 
+# Белый список общий для всех снипетов: строка, не совпавшая ни с одним
+# выражением, отбрасывается. Обратные слэши тут не использовать — выражение
+# уезжает в LogQL внутри двойных кавычек, где \d станет недопустимой
+# escape-последовательностью. Классы вида [0-9] безопасны.
 alloy_keep_expressions:
   # ssh
   - "Accepted (publickey|password) for"
+  # ansible: падения регулярных задач Semaphore
+  - "fatal:"
+  - "unreachable:"
+  # строка PLAY RECAP по каждому хосту: пульс «прогон дошёл до конца»
+  - "ok=[0-9]+ +changed=[0-9]+"
 
 
   

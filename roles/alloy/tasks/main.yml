@@ -6,6 +6,24 @@
       берутся из roles/alloy/templates/snippets/.
   when: alloy_snippets | length == 0
 
+# Без каталога Ansible на стороне Semaphore тихо выключает логирование,
+# а Alloy тихо не находит файлов — регулярные задачи падали бы незаметно.
+- name: Check the scheduled-run log directory
+  stat:
+    path: "{{ alloy_ansible_log_dir }}"
+  register: alloy_ansible_log_stat
+  when: "'ansible' in alloy_snippets"
+
+- name: Fail if the scheduled-run log directory is missing
+  fail:
+    msg: >
+      Нет каталога {{ alloy_ansible_log_dir }}. Semaphore не сможет писать
+      туда лог, а Alloy молча не увидит ни одной ошибки регулярных задач.
+      Создай его на этом хосте: mkdir -p {{ alloy_ansible_log_dir }}
+  when:
+    - "'ansible' in alloy_snippets"
+    - not alloy_ansible_log_stat.stat.exists
+
 - name: Create alloy directory
   file:
     path: "{{ alloy_path }}"

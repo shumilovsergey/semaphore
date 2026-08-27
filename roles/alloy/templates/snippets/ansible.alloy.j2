@@ -1,0 +1,20 @@
+// Логи Ansible от Semaphore. Сюда попадают ТОЛЬКО те прогоны, которым
+// Semaphore подставил ANSIBLE_LOG_PATH через Environment — ручной запуск
+// того же плейбука пишет в log_path из ansible.cfg и в Loki не едет.
+// Разделение структурное, а не по тексту строки.
+//
+// Один файл на шаблон Semaphore: имя файла приезжает меткой filename,
+// по ней в Grafana и различаются плейбуки.
+local.file_match "ansible" {
+	path_targets = [
+		{
+			__path__ = "{{ alloy_ansible_log_glob }}",
+			job      = "ansible",
+		},
+	]
+}
+
+loki.source.file "ansible" {
+	targets    = local.file_match.ansible.targets
+	forward_to = [loki.process.filter.receiver]
+}

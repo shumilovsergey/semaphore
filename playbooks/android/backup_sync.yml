@@ -36,28 +36,17 @@
     # сколько успешных поколений держим на каждый сервер
     backup_generations: 3
 
-
-    # Транспорт — scp на обоих прыжках. Один механизм на все устройства:
-    # rsync требует бинарник на ОБЕИХ сторонах, а на RouterOS его нет и
-    # поставить некуда. Инкрементальности не теряем: hop 2 и раньше лил всё
-    # целиком (каталог поколения всегда пустой), а /backup — это сотни
-    # килобайт.
-    #
-    # -O включает старый протокол SCP вместо SFTP: RouterOS его понимает
-    # надёжнее. Нужен OpenSSH >= 8.6 на контроллере; на старом — очистить
-    # список, тогда пойдёт SFTP.
     backup_scp_opts:
       - -O
 
-    # ServerAliveInterval * ServerAliveCountMax = потолок молчания в секундах.
-    # У scp нет rsync-овского --timeout, зависшую передачу закрывает это.
+
+ПРОВЕРКА ОШИБКИ
+
     backup_ssh_opts: >-
       -o BatchMode=yes -o StrictHostKeyChecking=accept-new
       -o ConnectTimeout=15 -o ServerAliveInterval=15
       -o ServerAliveCountMax=4
 
-    # Оборванная передача — вещь преходящая, поэтому ретраим сам scp.
-    # Исчерпали попытки -> rescue -> сервер помечен FAILED, прогон идёт дальше.
     backup_transfer_retries: 3
     backup_transfer_delay: 5
 

@@ -30,6 +30,9 @@
   gather_facts: false
   become: false
 
+
+ПРОВЕРКА ОШИБКИ
+
   vars:
     termux_prefix: /data/data/com.termux/files/usr
     termux_home: /data/data/com.termux/files/home
