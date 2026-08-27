@@ -38,8 +38,9 @@ loki_port: "9107"
 
 # -- alloy --------------------------
 alloy_snippets: [system]
-alloy_keep_expressions:
-  - "sshd.*Accepted (publickey|password) for"
 
+alloy_keep_expressions:
+  - "Accepted (publickey|password) for"
+  - "session opened for user"
 
   
