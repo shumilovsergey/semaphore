@@ -45,3 +45,5 @@ nft_allow_input_extra:
 
 # -- alloy --------------------------
 alloy_snippets: [system, nginx]
+alloy_keep_expressions:
+  - "sshd.*Accepted (publickey|password) for"
