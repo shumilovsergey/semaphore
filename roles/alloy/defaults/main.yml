@@ -36,6 +36,19 @@ alloy_journal_max_age: "12h"
 alloy_nginx_access_glob: "/var/log/nginx/*access*.log"
 alloy_nginx_error_glob: "/var/log/nginx/*error*.log"
 
+# --- snippets/ansible.alloy.j2 ---
+# Каталог, куда пишут логи регулярные задачи Semaphore. Наполняет его не
+# роль, а сам Ansible: в Environment нужного шаблона задаётся переменная
+# окружения ANSIBLE_LOG_PATH со своим файлом на шаблон, например
+#   {"ANSIBLE_LOG_PATH": "/var/log/ansible/scheduled/backup_sync.log"}
+# Ручные прогоны этой переменной не получают и пишут в log_path из
+# ansible.cfg, поэтому в Loki не попадают.
+#
+# Каталог должен существовать на хосте Semaphore: Ansible его не создаёт,
+# а при отсутствии просто отключает логирование с warning в stdout.
+alloy_ansible_log_dir: "/var/log/ansible/scheduled"
+alloy_ansible_log_glob: "{{ alloy_ansible_log_dir }}/*.log"
+
 # --- фильтр, общий для всех снипетов ---
 alloy_keep_expressions: []
 # белый список: совпало = попало, всё остальное отбрасывается
