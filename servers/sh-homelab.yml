@@ -38,3 +38,8 @@ loki_port: "9107"
 
 # -- alloy --------------------------
 alloy_snippets: [system]
+alloy_keep_expressions:
+  - ssh
+
+
+  
