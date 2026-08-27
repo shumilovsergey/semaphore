@@ -47,6 +47,8 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 
 - [Установка Semaphore](./tools/install.md)
 
+- [Правила репозитория](./tools/RULES.md)
+
 - [Подробнее про роли](./roles/README.md)
 
 - [Подробнее про сервера](./servers/README.md)

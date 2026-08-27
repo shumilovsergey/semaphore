@@ -17,12 +17,27 @@
     timeout: 3
   when: not service_file.stat.exists
 
-- name: Download node_exporter binary
+- name: Create binary cache directory on the controller
+  file:
+    path: "{{ node_exporter_cache_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: Cache node_exporter binary on the controller
   get_url:
     url: "{{ node_exporter_url }}"
+    dest: "{{ node_exporter_cache_path }}"
+    mode: "0644"
+  delegate_to: localhost
+  run_once: true
+
+- name: Upload node_exporter binary to the host
+  copy:
+    src: "{{ node_exporter_cache_path }}"
     dest: "{{ bin_path }}"
     mode: "0755"
-    force: yes
   notify: Restart node_exporter
 
 - name: Set ownership on node_exporter directory

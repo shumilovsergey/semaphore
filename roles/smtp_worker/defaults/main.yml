@@ -31,3 +31,10 @@ smtp_worker_providers:
     TO_ADDRESS: ""
     # MandatoryStartTLS | OpportunisticStartTLS | NoStartTLS
     STARTTLS_POLICY: "MandatoryStartTLS"
+
+# Бинарь не качается с хоста, а приезжает с контроллера по ssh — RULES.md #5.
+# Версии у артефакта нет, он катится с main, поэтому кеш на контроллере
+# обновляем каждый прогон. Лишнего трафика по ssh это не даёт: copy сверяет
+# контрольные суммы и не перегоняет одинаковый файл.
+smtp_worker_cache_dir: "/var/tmp/ansible-bin-cache"
+smtp_worker_cache_path: "{{ smtp_worker_cache_dir }}/smtp-worker-main"

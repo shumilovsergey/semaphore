@@ -49,21 +49,40 @@
                                or not grafana_stamp.stat.exists
                                or (grafana_stamp_content.content | b64decode | trim) != (grafana_version | string) }}"
 
-- name: Download grafana binary
+- name: Create binary cache directory on the controller
+  file:
+    path: "{{ grafana_cache_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: Cache grafana artifacts on the controller
   get_url:
-    url: "{{ grafana_url }}"
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { url: "{{ grafana_url }}", dest: "{{ grafana_cache_path }}" }
+    - { url: "{{ grafana_homepath_url }}", dest: "{{ grafana_homepath_cache_path }}" }
+  loop_control:
+    label: "{{ item.dest | basename }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Upload grafana binary to the host
+  copy:
+    src: "{{ grafana_cache_path }}"
     dest: "{{ bin_path }}"
     mode: "0755"
-    force: yes
   when: grafana_needs_install | bool
   notify: Restart grafana
 
-- name: Download grafana homepath archive
-  get_url:
-    url: "{{ grafana_homepath_url }}"
+- name: Upload grafana homepath archive to the host
+  copy:
+    src: "{{ grafana_homepath_cache_path }}"
     dest: "{{ archive_path }}"
     mode: "0644"
-    force: yes
   when: grafana_needs_install | bool
 
 # Чистим старые public/ и conf/defaults.ini, чтобы от прошлой версии

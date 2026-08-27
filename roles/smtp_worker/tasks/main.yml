@@ -30,12 +30,28 @@
     timeout: 3
   when: not service_file.stat.exists
 
-- name: Download smtp-worker binary
+- name: Create binary cache directory on the controller
+  file:
+    path: "{{ smtp_worker_cache_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: Cache smtp-worker binary on the controller
   get_url:
     url: "{{ smtp_worker_url }}"
+    dest: "{{ smtp_worker_cache_path }}"
+    mode: "0644"
+    force: yes
+  delegate_to: localhost
+  run_once: true
+
+- name: Upload smtp-worker binary to the host
+  copy:
+    src: "{{ smtp_worker_cache_path }}"
     dest: "{{ bin_path }}"
     mode: "0755"
-    force: yes
   notify: Restart smtp-worker
 
 - name: Set ownership on smtp-worker directory
