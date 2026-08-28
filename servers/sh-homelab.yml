@@ -42,8 +42,6 @@ alloy_snippets: [system]
 alloy_keep_expressions:
   # ssh
   - "Accepted (publickey|password) for"
-  # cron tasks monitoring
-  - "Stopped running task github_clone"
-
-
-  
+  # cron tasks loki
+  - "playbook=github_clone status=failed"
+  - "playbook=backup_sync  status=failed"
