@@ -35,18 +35,13 @@
     termux_home: /data/data/com.termux/files/home
     backup_dir: "{{ termux_home }}/backup/github-cloner"
 
+СЛОМАТЬ ПЛЕЙБУК ЖЕСТКА
+
     # В Termux нет записи в passwd для u0_aXXX. Ansible разворачивает '~' не сам,
-    # а через remote `echo ~u0_a226`: bash не может резолвить имя и возвращает
-    # строку как есть. Для remote_tmp это сходит с рук — Ansible создаёт каталог
-    # с буквальным именем '~u0_a226' и одинаково по нему пишет и читает.
-    # Async так не умеет: async_wrapper разворачивает '~' через $HOME питоном,
-    # async_status идёт в шелловый '~u0_a226/.ansible_async' — и не находит job.
-    # Поэтому оба пути задаём абсолютными, разворачивать нечего.
+    # а через remote `echo ~u0_a226`
     ansible_remote_tmp: "{{ termux_home }}/.ansible/tmp"
     ansible_async_dir: "{{ termux_home }}/.ansible_async"
 
-    # Android усыпляет Termux вместе со всеми процессами — соединение при этом
-    # остаётся открытым, и Ansible висит на нём вечно. Wake lock это лечит.
     termux_wake_lock: true
 
     # потолок времени на ОДИН репозиторий, сек
