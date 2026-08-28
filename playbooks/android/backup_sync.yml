@@ -195,26 +195,6 @@
               {{ backup_results | rejectattr('status', 'eq', 'OK')
                  | map(attribute='server') | list }}
 
-        # Письмо уходит ДО assert: тот валит плей, и всё, что после него,
-        # уже не выполнится.
-        - name: Notify by email about servers that did not sync
-          ansible.builtin.include_role:
-            name: notify_email
-          vars:
-            notify_email_subject: >-
-              [Ansible] backup_sync: {{ backup_failed | length }} из
-              {{ backup_servers | length }} не синхронизированы
-            notify_email_body: |
-              Прогон: {{ backup_stamp }}
-
-              {% for r in backup_results %}
-              {{ '%-18s' | format(r.server) }} {{ r.status }}{{ ' — ' + r.msg if r.msg else '' }}
-              {% endfor %}
-
-              Прошлые поколения упавших серверов на телефоне не тронуты.
-              Подробности — в логе задачи Semaphore.
-          when: backup_failed | length > 0
-
         - name: All servers synced successfully
           ansible.builtin.assert:
             that: backup_failed | length == 0
