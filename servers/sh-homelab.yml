@@ -44,4 +44,4 @@ alloy_keep_expressions:
   - "Accepted (publickey|password) for"
   # cron tasks loki
   - "playbook=github_clone status=failed"
-  - "playbook=backup_sync  status=failed"
+  - "playbook=backup_sync status=failed"
