@@ -35,7 +35,6 @@
     termux_home: /data/data/com.termux/files/home
     backup_dir: "{{ termux_home }}/backup/github-cloner"
 
-СЛОМАТЬ ПЛЕЙБУК ЖЕСТКА
 
     # В Termux нет записи в passwd для u0_aXXX. Ansible разворачивает '~' не сам,
     # а через remote `echo ~u0_a226`
