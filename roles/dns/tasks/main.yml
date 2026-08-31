@@ -14,3 +14,9 @@
 
 - name: Apply DNS config ({{ dns_manager }})
   include_tasks: "{{ dns_manager }}.yml"
+
+- name: Apply pending resolver restart before verification
+  meta: flush_handlers
+
+- name: Verify effective DNS
+  include_tasks: verify.yml

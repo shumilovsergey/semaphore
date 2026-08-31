@@ -61,3 +61,4 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 
 - [Публичный репозиторий ролей](./tools/sync_shumilov_roles.md)
 
+
