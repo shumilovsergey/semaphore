@@ -1,0 +1,48 @@
+---
+
+# Роль настраивает резолвер, но фактические адреса могут приходить и с сетевого
+# слоя (netplan/networkd, cloud-init, DHCP-клиент). Такая настройка перебивает
+# глобальную, поэтому проверяем не записанный файл, а то, что реально отвечает
+# на запросы. Разбор проблемы: tools/dns_role_problem.md
+
+- name: Get effective DNS servers (systemd-resolved)
+  shell: |
+    set -o pipefail
+    iface=$(resolvectl status | awk '/^Link [0-9]+ \(/{i=$3; gsub(/[()]/,"",i)} /\+DefaultRoute/{print i; exit}')
+    if [ -n "$iface" ]; then
+      resolvectl dns "$iface" | sed 's/.*: //'
+    else
+      resolvectl dns | awk -F': ' '/Global/{print $2}'
+    fi
+  args:
+    executable: /bin/bash
+  register: dns_effective_resolved
+  changed_when: false
+  when: dns_manager == 'systemd_resolved'
+
+- name: Get effective DNS servers (resolv.conf)
+  shell: "grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '\\n' ' '"
+  register: dns_effective_file
+  changed_when: false
+  when: dns_manager != 'systemd_resolved'
+
+- name: Collect effective DNS servers
+  set_fact:
+    dns_effective: >-
+      {{ ((dns_effective_resolved.stdout | default('')) if dns_manager == 'systemd_resolved'
+          else (dns_effective_file.stdout | default(''))).split() | sort }}
+    dns_expected: "{{ dns_servers | map('string') | sort }}"
+
+- name: Fail if effective DNS does not match dns_servers
+  fail:
+    msg: >-
+      DNS config was written, but the resolver actually uses {{ dns_effective | join(' ') | default('nothing', true) }}
+      instead of {{ dns_expected | join(' ') }}.
+      Something else on this host supplies DNS with higher priority than the resolver config:
+      check the network layer (netplan/networkd, cloud-init, NetworkManager, DHCP)
+      and set the nameservers there as well. See tools/dns_role_problem.md
+  when: dns_effective != dns_expected
+
+- name: Effective DNS matches declared dns_servers
+  debug:
+    msg: "Effective DNS: {{ dns_effective | join(' ') }}"
