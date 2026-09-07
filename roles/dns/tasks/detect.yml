@@ -1,0 +1,81 @@
+---
+
+# Одна проба снимает всё, что нужно и для выбора backend'а, и для guard'ов.
+# Вывод — YAML, чтобы разбирать его from_yaml, а не парсить строки в Jinja.
+
+- name: dns | collect layer facts
+  become: true
+  shell:
+    cmd: |
+      resolved=no
+      systemctl is-active --quiet systemd-resolved 2>/dev/null && resolved=yes
+
+      netplan=no
+      ls /etc/netplan/*.yaml /etc/netplan/*.yml >/dev/null 2>&1 && netplan=yes
+
+      # Proxmox переписывает resolv.conf из своего конфига
+      pve=no
+      grep -q 'BEGIN PVE' /etc/resolv.conf 2>/dev/null && pve=yes
+
+      symlink=no
+      [ -L /etc/resolv.conf ] && symlink=yes
+
+      immutable=no
+      lsattr -d "$(readlink -f /etc/resolv.conf)" 2>/dev/null | awk '$1 ~ /i/ {print "yes"}' | grep -q yes && immutable=yes
+
+      iface=$(ip -o route show default 2>/dev/null | awk '{print $5; exit}')
+
+      # незакомментированные dns-nameservers из ifupdown
+      ifupdown=$(grep -rhs -E '^[[:space:]]*dns-nameservers[[:space:]]' \
+                   /etc/network/interfaces /etc/network/interfaces.d/ 2>/dev/null \
+                 | head -1 | sed 's/^[[:space:]]*dns-nameservers[[:space:]]*//; s/,/ /g')
+
+      printf 'resolved: "%s"\nnetplan: "%s"\npve: "%s"\nsymlink: "%s"\nimmutable: "%s"\niface: "%s"\nifupdown: "%s"\n' \
+        "$resolved" "$netplan" "$pve" "$symlink" "$immutable" "$iface" "$ifupdown"
+      exit 0
+    executable: /bin/bash
+  register: _dns_probe
+  changed_when: false
+  check_mode: false
+
+- name: dns | parse layer facts
+  set_fact:
+    dns_state: "{{ _dns_probe.stdout | from_yaml }}"
+
+- name: dns | refuse on Proxmox-managed resolv.conf
+  fail:
+    msg: >-
+      /etc/resolv.conf на этом хосте пишет Proxmox (заголовок "BEGIN PVE") —
+      правка из Ansible будет затёрта. Меняй DNS в Datacenter -> Options -> DNS,
+      затем убери dns из server_roles этого хоста.
+  when: dns_state.pve == 'yes'
+
+- name: dns | refuse on immutable resolv.conf
+  fail:
+    msg: "/etc/resolv.conf помечен chattr +i. Сними флаг вручную — роль его не трогает."
+  when: dns_state.immutable == 'yes'
+
+- name: dns | refuse when default route interface is unknown
+  fail:
+    msg: "Не удалось определить интерфейс с default route — роль не знает, какой линк настраивать."
+  when: dns_state.iface | length == 0
+
+- name: dns | choose backend
+  set_fact:
+    dns_backend_effective: "{{ 'netplan' if (dns_state.netplan == 'yes' and dns_state.resolved == 'yes') else 'resolv_conf' }}"
+
+- name: dns | declared backend must match detected
+  fail:
+    msg: >-
+      dns_backend='{{ dns_backend }}', но на хосте обнаружен '{{ dns_backend_effective }}'
+      (netplan={{ dns_state.netplan }}, systemd-resolved={{ dns_state.resolved }}).
+      Исправь dns_backend в servers/{{ inventory_hostname }}.yml или разберись с хостом руками.
+  when:
+    - dns_backend | length > 0
+    - dns_backend != dns_backend_effective
+
+- name: dns | report detected layout
+  debug:
+    msg: >-
+      {{ inventory_hostname }}: backend={{ dns_backend_effective }},
+      iface={{ dns_state.iface }}, resolved={{ dns_state.resolved }}

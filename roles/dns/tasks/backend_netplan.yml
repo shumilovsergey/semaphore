@@ -1,0 +1,56 @@
+---
+
+# netplan -> networkd -> systemd-resolved. Адреса приезжают на линк, поэтому
+# управлять надо netplan'ом, а не резолвером.
+
+- name: dns | deploy netplan DNS override
+  become: true
+  template:
+    src: 99-ansible-dns.yaml.j2
+    dest: /etc/netplan/99-ansible-dns.yaml
+    mode: "0600"
+  register: dns_netplan_file
+
+# netplan generate — валидатор: падает на кривом YAML, ничего не применив.
+# Порядок generate -> apply обязателен, apply без generate работает на старом.
+- name: dns | apply netplan override
+  become: true
+  when: dns_netplan_file.changed
+  block:
+    - name: dns | validate netplan config
+      command: netplan generate
+      changed_when: false
+
+    - name: dns | apply netplan config
+      command: netplan apply
+  rescue:
+    - name: dns | remove rejected netplan override
+      file:
+        path: /etc/netplan/99-ansible-dns.yaml
+        state: absent
+
+    - name: dns | regenerate previous netplan state
+      command: netplan generate
+      changed_when: false
+
+    - name: dns | fail after netplan rollback
+      fail:
+        msg: >-
+          netplan отверг конфиг с DNS. 99-ansible-dns.yaml удалён, предыдущее
+          состояние восстановлено. Смотри вывод netplan generate выше.
+
+# Прошлая версия роли клала DNS в глобальный scope резолвера. На netplan-хостах
+# он не участвует в резолвинге — файл только путает следующего читающего.
+- name: dns | drop dead resolved drop-in from the previous role version
+  become: true
+  file:
+    path: /etc/systemd/resolved.conf.d/dns.conf
+    state: absent
+  register: dns_resolved_dropin
+
+- name: dns | restart systemd-resolved after dropping the drop-in
+  become: true
+  systemd:
+    name: systemd-resolved
+    state: restarted
+  when: dns_resolved_dropin.changed

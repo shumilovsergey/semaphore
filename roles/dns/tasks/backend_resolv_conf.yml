@@ -1,0 +1,37 @@
+---
+
+# Статический /etc/resolv.conf. Файл переписывается целиком — это заодно
+# убирает дубли search/domain, накопившиеся на части хостов парка.
+
+- name: dns | refuse when resolv.conf is a symlink
+  fail:
+    msg: >-
+      /etc/resolv.conf — симлинк, значит файлом владеет другой слой
+      (systemd-resolved, NetworkManager, resolvconf). Разберись с ним прежде
+      чем управлять DNS через статический файл: server_info metric=dns покажет,
+      кто именно.
+  when: dns_state.symlink == 'yes'
+
+- name: dns | refuse when ifupdown declares other nameservers
+  fail:
+    msg: >-
+      /etc/network/interfaces объявляет dns-nameservers '{{ dns_state.ifupdown }}',
+      а роль ставит '{{ dns_servers | join(' ') }}'. При ifdown/ifup хост уедет на
+      чужие адреса. Приведи строку к целевому набору или убери её.
+  when:
+    - dns_state.ifupdown | length > 0
+    - (dns_state.ifupdown.split() | sort) != (dns_servers | map('string') | sort)
+
+- name: dns | write /etc/resolv.conf
+  become: true
+  copy:
+    dest: /etc/resolv.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible role dns. Правки будут затёрты.
+      {% for srv in dns_servers %}
+      nameserver {{ srv }}
+      {% endfor %}
+      {% if dns_domain %}
+      search {{ dns_domain }}
+      {% endif %}

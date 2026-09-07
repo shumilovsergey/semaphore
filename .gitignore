@@ -1,3 +1,6 @@
 *.DS_Store
 CLAUDE.md
 brainstorm
+# артефакты локального прогона ansible
+__pycache__/
+tools/manual_dns_changes.md

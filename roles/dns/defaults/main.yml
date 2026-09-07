@@ -1,5 +1,13 @@
 ---
-dns_servers: []    # required: list of nameserver IPs
-dns_domain: ""     # optional: search domain (e.g. expoforum.ru)
-dns_manager: ""    # required: resolv_conf | systemd_resolved | networkmanager
 
+dns_servers: ["10.10.10.10", "11.11.11.11"]
+dns_domain: "dns_domain.ru"
+
+# Пусто — backend определяется автоматически. Если задан явно, должен совпасть
+# с обнаруженным, иначе роль падает.
+#   resolv_conf — статический /etc/resolv.conf, systemd-resolved выключен
+#   netplan     — netplan -> networkd -> systemd-resolved (stub)
+dns_backend: ""
+
+# Имя для контрольного запроса после применения. Пусто — проверка пропускается.
+dns_probe_name: "{{ dns_domain }}"
