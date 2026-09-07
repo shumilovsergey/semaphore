@@ -11,7 +11,9 @@
       systemctl is-active --quiet systemd-resolved 2>/dev/null && resolved=yes
 
       netplan=no
-      ls /etc/netplan/*.yaml /etc/netplan/*.yml >/dev/null 2>&1 && netplan=yes
+      for f in /etc/netplan/*.yaml /etc/netplan/*.yml; do
+        [ -e "$f" ] && { netplan=yes; break; }
+      done
 
       # Proxmox переписывает resolv.conf из своего конфига
       pve=no
