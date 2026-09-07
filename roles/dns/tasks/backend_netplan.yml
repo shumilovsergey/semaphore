@@ -1,45 +1,97 @@
 ---
 
 # netplan -> networkd -> systemd-resolved. Адреса приезжают на линк, поэтому
-# управлять надо netplan'ом, а не резолвером.
+# управлять надо слоем networkd, а не резолвером.
+#
+# Отдельный файл в /etc/netplan/ здесь не работает: netplan мержит
+# nameservers.addresses как список и наши адреса ДОБАВЛЯЮТСЯ к тем, что уже
+# объявлены в 00-installer-config.yaml. Поэтому роль кладёт drop-in для
+# сгенерированного networkd-файла и сбрасывает список пустым присваиванием.
+#
+# Drop-in живёт в /etc, а генерат netplan — в /run, так что правка переживает
+# и netplan apply, и перегенерацию cloud-init при загрузке.
 
-- name: dns | deploy netplan DNS override
+- name: dns | find the networkd file for the default route interface
+  become: true
+  shell:
+    cmd: |
+      f=$(networkctl status "{{ dns_state.iface }}" 2>/dev/null | awk -F': *' '/Network File:/{print $2; exit}')
+      printf 'network_file: "%s"\n' "$f"
+      exit 0
+    executable: /bin/bash
+  register: _dns_netfile
+  changed_when: false
+  check_mode: false
+
+- name: dns | parse networkd file path
+  set_fact:
+    dns_netfile: "{{ (_dns_netfile.stdout | from_yaml).network_file | default('') }}"
+
+- name: dns | refuse when networkd config file is unknown
+  fail:
+    msg: >-
+      networkctl не назвал .network-файл для {{ dns_state.iface }}
+      (получено '{{ dns_netfile }}'). Без него некуда положить drop-in.
+  when:
+    - dns_netfile | length == 0 or dns_netfile == 'n/a'
+
+# оверлей от прошлой версии роли: он только добавлял адреса к чужим
+- name: dns | remove netplan overlay left by the previous approach
+  become: true
+  file:
+    path: /etc/netplan/99-ansible-dns.yaml
+    state: absent
+  register: dns_netplan_overlay
+
+- name: dns | regenerate netplan config after removing the overlay
+  become: true
+  command: netplan generate
+  when: dns_netplan_overlay.changed
+  changed_when: false
+
+- name: dns | create networkd drop-in directory
+  become: true
+  file:
+    path: "/etc/systemd/network/{{ dns_netfile | basename }}.d"
+    state: directory
+    mode: "0755"
+
+- name: dns | deploy networkd DNS drop-in
   become: true
   template:
-    src: 99-ansible-dns.yaml.j2
-    dest: /etc/netplan/99-ansible-dns.yaml
-    mode: "0600"
-  register: dns_netplan_file
+    src: 99-ansible-dns.conf.j2
+    dest: "/etc/systemd/network/{{ dns_netfile | basename }}.d/99-ansible-dns.conf"
+    mode: "0644"
+  register: dns_dropin
 
-# netplan generate — валидатор: падает на кривом YAML, ничего не применив.
-# Порядок generate -> apply обязателен, apply без generate работает на старом.
-- name: dns | apply netplan override
+# reload перечитывает конфиги, reconfigure применяет их к линку — это мягче,
+# чем netplan apply, и не трогает адресацию с маршрутами
+- name: dns | apply networkd configuration
   become: true
-  when: dns_netplan_file.changed
+  when: dns_dropin.changed or dns_netplan_overlay.changed
   block:
-    - name: dns | validate netplan config
-      command: netplan generate
-      changed_when: false
+    - name: dns | reload networkd configuration
+      command: networkctl reload
 
-    - name: dns | apply netplan config
-      command: netplan apply
+    - name: dns | reconfigure the interface
+      command: "networkctl reconfigure {{ dns_state.iface }}"
   rescue:
-    - name: dns | remove rejected netplan override
+    - name: dns | remove rejected drop-in
       file:
-        path: /etc/netplan/99-ansible-dns.yaml
+        path: "/etc/systemd/network/{{ dns_netfile | basename }}.d/99-ansible-dns.conf"
         state: absent
 
-    - name: dns | regenerate previous netplan state
-      command: netplan generate
+    - name: dns | restore previous networkd state
+      command: "networkctl reload"
       changed_when: false
 
-    - name: dns | fail after netplan rollback
+    - name: dns | fail after networkd rollback
       fail:
         msg: >-
-          netplan отверг конфиг с DNS. 99-ansible-dns.yaml удалён, предыдущее
-          состояние восстановлено. Смотри вывод netplan generate выше.
+          networkd не принял drop-in с DNS. Файл удалён, прежнее состояние
+          восстановлено. Смотри вывод networkctl выше.
 
-# Прошлая версия роли клала DNS в глобальный scope резолвера. На netplan-хостах
+# Прошлая версия роли клала DNS в глобальный scope резолвера. На этих хостах
 # он не участвует в резолвинге — файл только путает следующего читающего.
 - name: dns | drop dead resolved drop-in from the previous role version
   become: true

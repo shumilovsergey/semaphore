@@ -77,15 +77,38 @@ Backend для `resolved.conf.d` не сделан сознательно: в п
 где глобальный scope резолвера реально участвует в резолвинге. Старый
 `dns.conf` роль удаляет как мёртвый конфиг.
 
-`netplan`-backend кладёт отдельный `/etc/netplan/99-ansible-dns.yaml` только с
-`nameservers` для интерфейса с default route. Именно отдельный файл, а не правка
-чужого: netplan мержит `/etc/netplan/*` по порядку имён, поэтому `99-` перебивает
-`00-installer-config.yaml` и `50-cloud-init.yaml`, ничего в них не редактируя —
-а файл cloud-init к тому же перегенерируется при каждой загрузке.
+`netplan`-backend управляет DNS **через drop-in для systemd-networkd**, а не
+через файл в `/etc/netplan/`.
 
-Порядок применения — `netplan generate` (валидатор, падает на кривом YAML ничего
-не применив), затем `netplan apply`. При отказе `rescue` удаляет наш файл,
-перегенерирует прежнее состояние и падает с объяснением.
+Отдельный `99-ansible-dns.yaml` в `/etc/netplan/` не годится, хотя выглядит
+очевидным решением: netplan мержит `nameservers.addresses` как **список**, и наши
+адреса не заменяют объявленные в `00-installer-config.yaml`, а дописываются к ним.
+Проверено на живом хосте — `netplan get ethernets.ens18.nameservers` вернул
+объединение трёх адресов, и первым в очереди остался чужой.
+
+Рабочая схема: роль спрашивает у `networkctl status <iface>` имя
+сгенерированного файла (`/run/systemd/network/10-netplan-<iface>.network`) и
+кладёт drop-in `/etc/systemd/network/<то же имя>.d/99-ansible-dns.conf`:
+
+```ini
+[Network]
+DNS=
+DNS=10.2.11.242
+DNS=10.2.11.14
+Domains=
+Domains=expoforum.ru
+```
+
+Пустое присваивание **сбрасывает** список — без него networkd тоже дописывает.
+Проверено на dummy-интерфейсе: без сброса получается `1.1.1.1 2.2.2.2 3.3.3.3`,
+со сбросом — ровно заданный набор. То же поведение у `Domains=`.
+
+Drop-in лежит в `/etc`, а генерат netplan — в `/run`, поэтому правка переживает
+и `netplan apply`, и перегенерацию cloud-init при загрузке.
+
+Применение — `networkctl reload` плюс `networkctl reconfigure <iface>`: это мягче
+`netplan apply` и не трогает адресацию с маршрутами. При отказе `rescue` удаляет
+drop-in, перечитывает конфиг и падает с объяснением.
 
 Backend выбирается автоматически (`netplan` + активный `resolved` -> netplan,
 иначе resolv_conf), но если `dns_backend` задан в `servers/<hostname>.yml` явно —
