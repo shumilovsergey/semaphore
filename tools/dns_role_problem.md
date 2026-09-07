@@ -98,6 +98,18 @@ resolvectl dns               # адреса по каждому линку
 grep -r nameservers /etc/netplan/
 ```
 
-Роль `server_info` с `metric=dns` показывает адреса именно того линка, у
-которого `+DefaultRoute`, то есть те, что реально используются — на её вывод
-можно опираться.
+Роль `server_info` с `metric=dns` печатает обе оси сразу — провенанс
+`/etc/resolv.conf`, `nsswitch`, `/etc/hosts`, все scope'ы `systemd-resolved`
+(а не только линк с `+DefaultRoute`), netplan с его renderer'ом, `dns=` и
+keyfile'ы NetworkManager, `.network`-файлы, ifupdown, resolvconf, cloud-init,
+DHCP-lease и `supersede` в `dhclient.conf`, конфиги локальных dnsmasq/unbound/bind,
+nat-редирект 53-го порта и результат реального запроса. Метрика выполняется
+под root — иначе половина этих файлов нечитаема. Сводка идёт первыми строками,
+полный срез — следом.
+
+Грепаемые маркеры в выводе: `RESOLVER=` (кто отвечает на запросы), `HOSTS=`
+(статические записи, которые идут раньше DNS), `SOURCE=<слой>` (какие слои
+реально объявляют DNS — больше одного значит, что разбираться придётся),
+`EFFECTIVE=` (используемые по факту апстримы) и `CONFLICT=` — в частности, тот
+самый случай, когда Global перекрыт линком с `+DefaultRoute`, и перехват
+53-го порта файрволом.
