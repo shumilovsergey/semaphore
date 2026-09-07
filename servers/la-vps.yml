@@ -3,6 +3,13 @@
 #---roles
 server_roles:
   - autossh_identity
+  - nginx_certbot
 
 #---vars
 
+certbot_email: wumilovsergey@gmail.com
+vpn_allow_ip: 5.189.254.175
+
+nginx_sites:
+  # public
+  - { name: poc-telegram-auth, domain: poc-telegram-auth.sh-development.ru, port: 8000, vpn_only: false }
