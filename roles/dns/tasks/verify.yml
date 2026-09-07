@@ -20,6 +20,7 @@
     executable: /bin/bash
   register: _dns_effective
   changed_when: false
+  check_mode: false
 
 - name: dns | parse effective state
   set_fact:
@@ -44,7 +45,6 @@
     - dns_domain not in dns_effective.domains.split()
 
 # Прописанный, но недостижимый сервер (закрыт файрволом или просто выключен)
-# конфигом не ловится — на 10.2.11.24 в парке это уже случалось.
 - name: dns | probe each nameserver
   become: true
   shell:
@@ -67,6 +67,7 @@
     executable: /bin/bash
   register: _dns_reach
   changed_when: false
+  check_mode: false
 
 - name: dns | parse reachability
   set_fact:

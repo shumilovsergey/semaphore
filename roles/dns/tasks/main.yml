@@ -25,5 +25,7 @@
 - name: dns | apply ({{ dns_backend_effective }})
   include_tasks: "backend_{{ dns_backend_effective }}.yml"
 
+# в --check ничего не применялось, проверять нечего
 - name: dns | verify effective state
   include_tasks: verify.yml
+  when: not ansible_check_mode
