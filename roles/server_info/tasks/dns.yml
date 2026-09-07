@@ -77,8 +77,8 @@
       echo "resolv.conf.nameservers=$(awk '/^nameserver/{printf "%s ",$2}' /etc/resolv.conf 2>/dev/null)"
       echo "resolv.conf.search=$(sed -n 's/^\(search\|domain\)[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
       echo "resolv.conf.options=$(sed -n 's/^options[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
-      attr=$(lsattr /etc/resolv.conf 2>/dev/null | awk '{print ($1 ~ /i/) ? "yes (chattr +i)" : "no"}')
-      echo "resolv.conf.immutable=${attr:-unknown (lsattr недоступен или это симлинк)}"
+      attr=$(lsattr -d "$tgt" 2>/dev/null | awk '{print ($1 ~ /i/) ? "yes (chattr +i)" : "no"}')
+      echo "resolv.conf.immutable=${attr:-unknown (lsattr недоступен)}"
 
       # порядок источников для getaddrinfo
       echo "nsswitch.hosts=$(sed -n 's/^hosts:[[:space:]]*//p' /etc/nsswitch.conf 2>/dev/null)"
@@ -281,10 +281,18 @@
       echo "== effective =="
       ip -o route show default 2>/dev/null | awk '{print "default_route=" $5 " via " $3}'
 
-      # апстримы: сначала resolved, иначе resolv.conf
-      srvs=$(resolvectl dns 2>/dev/null | sed 's/.*: //' | tr ' ' '\n' | grep -E '^[0-9a-fA-F:.]+$' | sort -u)
+      # фактически используемые: DNS линка с default route, иначе Global
+      iface=$(ip -o route show default 2>/dev/null | awk '{print $5; exit}')
+      eff=$(resolvectl dns "$iface" 2>/dev/null | awk -F': ' 'NF>1{print $2}')
+      [ -z "$eff" ] && eff=$(resolvectl dns 2>/dev/null | awk -F': ' '/Global/ && NF>1 {print $2}')
+      [ -z "$eff" ] && eff=$(awk '/^nameserver/{printf "%s ",$2}' /etc/resolv.conf 2>/dev/null)
+      echo "EFFECTIVE=${eff:-нет}"
+
+      # все известные хосту апстримы — их и проверяем на доступность
+      srvs=$(resolvectl dns 2>/dev/null | awk -F': ' 'NF>1{print $2}' | tr ' ' '\n' \
+             | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*:[0-9a-fA-F:]*(%[^ ]+)?$' | sort -u)
       [ -z "$srvs" ] && srvs=$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null)
-      echo "EFFECTIVE=$(echo $srvs | tr '\n' ' ')"
+      echo "upstreams.all=$(echo $srvs | tr '\n' ' ')"
 
       # имя для проверки; вырожденные search domain отсеиваем
       name="{{ dns_probe_name | default('') }}"
@@ -302,7 +310,7 @@
       if command -v resolvectl >/dev/null 2>&1 && systemctl is-active --quiet systemd-resolved 2>/dev/null; then
         resolvectl query "$name" 2>&1 | head -8 | sed 's/^/probe.resolvectl: /'
       fi
-      g=$(getent ahostsv4 "$name" 2>&1 | head -3)
+      g=$(getent ahostsv4 "$name" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
       echo "probe.getent=${g:-NO ANSWER}"
 
       # доступность каждого апстрима
@@ -323,13 +331,13 @@
 - name: info | collect DNS
   set_fact:
     info_dns: >-
-      {{ ([_dnsa_resolver.stdout | default(''),
-           _dnsa_resolved.stdout | default(''),
-           _dnsa_sources.stdout  | default(''),
-           _dnsa_effective.stdout | default('')] | join('\n')).split('\n')
+      {{ ((_dnsa_resolver.stdout_lines  | default([]))
+         + (_dnsa_resolved.stdout_lines | default([]))
+         + (_dnsa_sources.stdout_lines  | default([]))
+         + (_dnsa_effective.stdout_lines | default([])))
          | map('trim') | reject('equalto', '') | list }}
 
-- name: info | output DNS
+- name: info | output DNS summary
   debug:
     msg: >-
       {{ [inventory_hostname + ':']
@@ -337,5 +345,8 @@
          + (info_dns | select('match', '^HOSTS=') | list)
          + ['SOURCES: ' + (info_dns | select('match', '^SOURCE=') | map('replace', 'SOURCE=', '') | list | join(', ') | default('не обнаружено', true))]
          + (info_dns | select('match', '^EFFECTIVE=') | list)
-         + (info_dns | select('match', '^CONFLICT=') | list)
-         + info_dns }}
+         + (info_dns | select('match', '^CONFLICT=') | list) }}
+
+- name: info | output DNS details
+  debug:
+    msg: "{{ info_dns }}"
