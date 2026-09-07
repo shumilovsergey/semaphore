@@ -1,0 +1,14 @@
+# Managed by Ansible role dns. Правки будут затёрты.
+#
+# Пустое присваивание сбрасывает список. Без него systemd-networkd добавляет
+# наши адреса к тем, что уже пришли из netplan, и первым в очереди остаётся
+# чужой сервер. Проверено: без сброса получается объединение списков.
+[Network]
+DNS=
+{% for srv in dns_servers %}
+DNS={{ srv }}
+{% endfor %}
+{% if dns_domain %}
+Domains=
+Domains={{ dns_domain }}
+{% endif %}

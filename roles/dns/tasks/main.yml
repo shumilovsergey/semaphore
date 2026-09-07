@@ -8,7 +8,8 @@
 #
 #   resolv_conf — статический /etc/resolv.conf, systemd-resolved выключен.
 #
-#   netplan     — netplan -> networkd -> systemd-resolved (stub). 
+#   netplan     — netplan -> networkd -> systemd-resolved (stub). Пишем drop-in
+#                 для networkd: netplan мержит nameservers, а не заменяет.
 #
 # Backend systemd-resolved (запись в resolved.conf.d) сознательно отсутствует - в парке таких нет
 
