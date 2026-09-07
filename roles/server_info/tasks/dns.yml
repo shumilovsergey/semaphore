@@ -41,81 +41,81 @@
 
 - name: info | DNS - inspect resolver layer
   become: true
-  shell: |
-    echo "== resolver =="
+  shell:
+    cmd: |
+      echo "== resolver =="
 
-    # чем является /etc/resolv.conf и кто его владелец
-    if [ -L /etc/resolv.conf ]; then
-      echo "resolv.conf.type=symlink -> $(readlink /etc/resolv.conf)"
-    else
-      echo "resolv.conf.type=regular file"
-    fi
-    tgt=$(readlink -f /etc/resolv.conf 2>/dev/null)
-    echo "resolv.conf.realpath=$tgt"
-    case "$tgt" in
-      /run/systemd/resolve/stub-resolv.conf) own="systemd-resolved (stub 127.0.0.53)" ;;
-      /run/systemd/resolve/resolv.conf)      own="systemd-resolved (uplink, stub в обход)" ;;
-      /run/NetworkManager/resolv.conf)       own="NetworkManager" ;;
-      *resolvconf*)                          own="resolvconf/openresolv" ;;
-      /etc/resolv.conf)                      own="static or unknown" ;;
-      *)                                     own="other ($tgt)" ;;
-    esac
-    echo "resolv.conf.owner=$own"
+      # чем является /etc/resolv.conf и кто его владелец
+      if [ -L /etc/resolv.conf ]; then
+        echo "resolv.conf.type=symlink -> $(readlink /etc/resolv.conf)"
+      else
+        echo "resolv.conf.type=regular file"
+      fi
+      tgt=$(readlink -f /etc/resolv.conf 2>/dev/null)
+      echo "resolv.conf.realpath=$tgt"
+      case "$tgt" in
+        /run/systemd/resolve/stub-resolv.conf) own="systemd-resolved (stub 127.0.0.53)" ;;
+        /run/systemd/resolve/resolv.conf)      own="systemd-resolved (uplink, stub в обход)" ;;
+        /run/NetworkManager/resolv.conf)       own="NetworkManager" ;;
+        *resolvconf*)                          own="resolvconf/openresolv" ;;
+        /etc/resolv.conf)                      own="static or unknown" ;;
+        *)                                     own="other ($tgt)" ;;
+      esac
+      echo "resolv.conf.owner=$own"
 
-    # резолвер — по первому nameserver
-    first=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf 2>/dev/null)
-    case "$first" in
-      127.0.0.53) echo "RESOLVER=systemd-resolved (stub)" ;;
-      127.*|::1)  echo "RESOLVER=локальный демон на $first — чей именно, см. listen53" ;;
-      '')         echo "RESOLVER=никого (в resolv.conf нет nameserver)" ;;
-      *)          echo "RESOLVER=libc напрямую на $first (resolv.conf от: $own)" ;;
-    esac
+      # резолвер — по первому nameserver
+      first=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf 2>/dev/null)
+      case "$first" in
+        127.0.0.53) echo "RESOLVER=systemd-resolved (stub)" ;;
+        127.*|::1)  echo "RESOLVER=локальный демон на $first — чей именно, см. listen53" ;;
+        '')         echo "RESOLVER=никого (в resolv.conf нет nameserver)" ;;
+        *)          echo "RESOLVER=libc напрямую на $first (resolv.conf от: $own)" ;;
+      esac
 
-    # содержимое resolv.conf
-    echo "resolv.conf.header=$(grep -m1 '^#' /etc/resolv.conf 2>/dev/null | cut -c1-140)"
-    echo "resolv.conf.nameservers=$(awk '/^nameserver/{printf "%s ",$2}' /etc/resolv.conf 2>/dev/null)"
-    echo "resolv.conf.search=$(sed -n 's/^\(search\|domain\)[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
-    echo "resolv.conf.options=$(sed -n 's/^options[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
-    attr=$(lsattr /etc/resolv.conf 2>/dev/null | awk '{print ($1 ~ /i/) ? "yes (chattr +i)" : "no"}')
-    echo "resolv.conf.immutable=${attr:-unknown (lsattr недоступен или это симлинк)}"
+      # содержимое resolv.conf
+      echo "resolv.conf.header=$(grep -m1 '^#' /etc/resolv.conf 2>/dev/null | cut -c1-140)"
+      echo "resolv.conf.nameservers=$(awk '/^nameserver/{printf "%s ",$2}' /etc/resolv.conf 2>/dev/null)"
+      echo "resolv.conf.search=$(sed -n 's/^\(search\|domain\)[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
+      echo "resolv.conf.options=$(sed -n 's/^options[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
+      attr=$(lsattr /etc/resolv.conf 2>/dev/null | awk '{print ($1 ~ /i/) ? "yes (chattr +i)" : "no"}')
+      echo "resolv.conf.immutable=${attr:-unknown (lsattr недоступен или это симлинк)}"
 
-    # порядок источников для getaddrinfo
-    echo "nsswitch.hosts=$(sed -n 's/^hosts:[[:space:]]*//p' /etc/nsswitch.conf 2>/dev/null)"
+      # порядок источников для getaddrinfo
+      echo "nsswitch.hosts=$(sed -n 's/^hosts:[[:space:]]*//p' /etc/nsswitch.conf 2>/dev/null)"
 
-    # юниты: active или enabled
-    for u in systemd-resolved NetworkManager systemd-networkd networking dnsmasq unbound named bind9 resolvconf nscd dnscrypt-proxy; do
-      a=$(systemctl is-active "$u" 2>/dev/null); a=${a:-unknown}
-      e=$(systemctl is-enabled "$u" 2>/dev/null); e=${e:-none}
-      [ "$a" = "active" ] || [ "$e" = "enabled" ] || continue
-      echo "service.$u=active:$a enabled:$e"
-    done
+      # юниты: active или enabled
+      for u in systemd-resolved NetworkManager systemd-networkd networking dnsmasq unbound named bind9 resolvconf nscd dnscrypt-proxy; do
+        a=$(systemctl is-active "$u" 2>/dev/null); a=${a:-unknown}
+        e=$(systemctl is-enabled "$u" 2>/dev/null); e=${e:-none}
+        [ "$a" = "active" ] || [ "$e" = "enabled" ] || continue
+        echo "service.$u=active:$a enabled:$e"
+      done
 
-    # кто слушает 53
-    ss -lntup 2>/dev/null | awk '$5 ~ /:53$/ {print "listen53=" $1 " " $5 " " $7}'
+      # кто слушает 53
+      ss -lntup 2>/dev/null | awk '$5 ~ /:53$/ {print "listen53=" $1 " " $5 " " $7}'
 
-    # доступный инструментарий
-    for b in resolvectl nmcli netplan networkctl resolvconf dig nslookup; do
-      p=$(command -v "$b" 2>/dev/null) && echo "binary.$b=$p"
-    done
+      # доступный инструментарий
+      for b in resolvectl nmcli netplan networkctl resolvconf dig nslookup; do
+        p=$(command -v "$b" 2>/dev/null) && echo "binary.$b=$p"
+      done
 
-    # статические записи в /etc/hosts помимо loopback
-    h=$(grep -vE '^[[:space:]]*(#|$)' /etc/hosts 2>/dev/null | grep -vE '^[[:space:]]*(127\.|::1|fe00::|ff0[0-9]::)')
-    if [ -n "$h" ]; then
-      echo "HOSTS=$(echo "$h" | wc -l) статических записей помимо loopback"
-      echo "$h" | head -30 | sed 's/^/hosts.file: /'
-    else
-      echo "HOSTS=нет (только loopback)"
-    fi
+      # статические записи в /etc/hosts помимо loopback
+      h=$(grep -vE '^[[:space:]]*(#|$)' /etc/hosts 2>/dev/null | grep -vE '^[[:space:]]*(127\.|::1|fe00::|ff0[0-9]::)')
+      if [ -n "$h" ]; then
+        echo "HOSTS=$(echo "$h" | wc -l) статических записей помимо loopback"
+        echo "$h" | head -30 | sed 's/^/hosts.file: /'
+      else
+        echo "HOSTS=нет (только loopback)"
+      fi
 
-    # редирект 53-го порта
-    nat=$( { nft list ruleset 2>/dev/null | grep -iE 'dport 53|dport \{ 53'; \
-             iptables -t nat -S 2>/dev/null | grep -E '\-\-dport 53'; } | head -6)
-    if [ -n "$nat" ]; then
-      echo "$nat" | sed 's/^/nat53: /'
-      echo "CONFLICT=dns-redirected-by-firewall (порт 53 переписывается правилами — прописанный апстрим может не совпадать с фактическим)"
-    fi
-    exit 0
-  args:
+      # редирект 53-го порта
+      nat=$( { nft list ruleset 2>/dev/null | grep -iE 'dport 53|dport \{ 53'; \
+               iptables -t nat -S 2>/dev/null | grep -E '\-\-dport 53'; } | head -6)
+      if [ -n "$nat" ]; then
+        echo "$nat" | sed 's/^/nat53: /'
+        echo "CONFLICT=dns-redirected-by-firewall (порт 53 переписывается правилами — прописанный апстрим может не совпадать с фактическим)"
+      fi
+      exit 0
     executable: /bin/bash
   register: _dnsa_resolver
   changed_when: false
@@ -125,42 +125,42 @@
 
 - name: info | DNS - inspect systemd-resolved scopes
   become: true
-  shell: |
-    echo "== systemd-resolved =="
-    if ! systemctl is-active --quiet systemd-resolved 2>/dev/null; then
-      echo "resolved=inactive"
+  shell:
+    cmd: |
+      echo "== systemd-resolved =="
+      if ! systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        echo "resolved=inactive"
+        exit 0
+      fi
+
+      resolvectl status --no-pager 2>/dev/null | sed -n 's/.*resolv.conf mode: */resolved.resolv_conf_mode=/p' | head -1
+
+      # все scopes: Global плюс по одному на линк
+      out=$(resolvectl status --no-pager 2>/dev/null | awk '
+        function flush() { if (name != "") printf "resolved.scope=%s default_route=%s dns=[%s] domains=[%s]\n", name, dr, srv, dom }
+        /^Global/           { flush(); name="Global"; dr="n/a"; srv=""; dom=""; next }
+        /^Link [0-9]+ \(/   { flush(); name=$3; gsub(/[()]/,"",name); dr="no"; srv=""; dom=""; next }
+        /Protocols:/        { if ($0 ~ /\+DefaultRoute/) dr="yes" }
+        /DNS Servers:/      { s=$0; sub(/^[^:]*:[[:space:]]*/,"",s); srv=s }
+        /DNS Domain:/       { s=$0; sub(/^[^:]*:[[:space:]]*/,"",s); dom=s }
+        END                 { flush() }')
+      echo "$out"
+
+      # Global перекрыт линком с +DefaultRoute
+      g=$(echo "$out" | sed -n 's/^resolved.scope=Global .*dns=\[\(.*\)\] domains=.*/\1/p')
+      l=$(echo "$out" | grep 'default_route=yes' | sed -n 's/^resolved.scope=\([^ ]*\) .*dns=\[\(.*\)\] domains=.*/\1:\2/p' | grep -v ':$' | tr '\n' ' ')
+      if [ -n "$g" ] && [ -n "$l" ]; then
+        echo "CONFLICT=resolved-global-ignored (Global=[$g], но у default-route линка свои: $l)"
+      fi
+      n=$(echo "$out" | grep -c 'default_route=yes')
+      [ "$n" -gt 1 ] && echo "CONFLICT=multiple-default-route-links ($n штук — проверять надо каждый)"
+      [ -n "$g" ] && echo "SOURCE=resolved-global"
+
+      # кто задаёт Global
+      grep -rns --include='*.conf' -E '^[[:space:]]*(DNS|FallbackDNS|Domains|DNSStubListener|DNSSEC)=' \
+        /etc/systemd/resolved.conf /etc/systemd/resolved.conf.d/ /run/systemd/resolved.conf.d/ \
+        /usr/lib/systemd/resolved.conf.d/ 2>/dev/null | sed 's/^/resolved.conf: /'
       exit 0
-    fi
-
-    resolvectl status --no-pager 2>/dev/null | sed -n 's/.*resolv.conf mode: */resolved.resolv_conf_mode=/p' | head -1
-
-    # все scopes: Global плюс по одному на линк
-    out=$(resolvectl status --no-pager 2>/dev/null | awk '
-      function flush() { if (name != "") printf "resolved.scope=%s default_route=%s dns=[%s] domains=[%s]\n", name, dr, srv, dom }
-      /^Global/           { flush(); name="Global"; dr="n/a"; srv=""; dom=""; next }
-      /^Link [0-9]+ \(/   { flush(); name=$3; gsub(/[()]/,"",name); dr="no"; srv=""; dom=""; next }
-      /Protocols:/        { if ($0 ~ /\+DefaultRoute/) dr="yes" }
-      /DNS Servers:/      { s=$0; sub(/^[^:]*:[[:space:]]*/,"",s); srv=s }
-      /DNS Domain:/       { s=$0; sub(/^[^:]*:[[:space:]]*/,"",s); dom=s }
-      END                 { flush() }')
-    echo "$out"
-
-    # Global перекрыт линком с +DefaultRoute
-    g=$(echo "$out" | sed -n 's/^resolved.scope=Global .*dns=\[\(.*\)\] domains=.*/\1/p')
-    l=$(echo "$out" | grep 'default_route=yes' | sed -n 's/^resolved.scope=\([^ ]*\) .*dns=\[\(.*\)\] domains=.*/\1:\2/p' | grep -v ':$' | tr '\n' ' ')
-    if [ -n "$g" ] && [ -n "$l" ]; then
-      echo "CONFLICT=resolved-global-ignored (Global=[$g], но у default-route линка свои: $l)"
-    fi
-    n=$(echo "$out" | grep -c 'default_route=yes')
-    [ "$n" -gt 1 ] && echo "CONFLICT=multiple-default-route-links ($n штук — проверять надо каждый)"
-    [ -n "$g" ] && echo "SOURCE=resolved-global"
-
-    # кто задаёт Global
-    grep -rns --include='*.conf' -E '^[[:space:]]*(DNS|FallbackDNS|Domains|DNSStubListener|DNSSEC)=' \
-      /etc/systemd/resolved.conf /etc/systemd/resolved.conf.d/ /run/systemd/resolved.conf.d/ \
-      /usr/lib/systemd/resolved.conf.d/ 2>/dev/null | sed 's/^/resolved.conf: /'
-    exit 0
-  args:
     executable: /bin/bash
   register: _dnsa_resolved
   changed_when: false
@@ -170,103 +170,103 @@
 
 - name: info | DNS - inspect configuration sources
   become: true
-  shell: |
-    echo "== sources =="
+  shell:
+    cmd: |
+      echo "== sources =="
 
-    # netplan
-    if [ -d /etc/netplan ]; then
-      ls -1 /etc/netplan/ 2>/dev/null | sed 's/^/netplan.file=/'
-      grep -rns -E '^[[:space:]]*(renderer|nameservers|addresses|search|dhcp4|dhcp6|use-dns):' \
-        /etc/netplan/ 2>/dev/null | sed 's/^/netplan: /'
-      r=$(grep -rhs -E '^[[:space:]]*renderer:' /etc/netplan/ 2>/dev/null | awk '{print $2}' | tail -1)
-      echo "netplan.renderer=${r:-not set (дефолт дистрибутива)}"
-      grep -rqs -E '^[[:space:]]*nameservers:' /etc/netplan/ 2>/dev/null && echo "SOURCE=netplan"
-    else
-      echo "netplan=absent"
-    fi
+      # netplan
+      if [ -d /etc/netplan ]; then
+        ls -1 /etc/netplan/ 2>/dev/null | sed 's/^/netplan.file=/'
+        grep -rns -E '^[[:space:]]*(renderer|nameservers|addresses|search|dhcp4|dhcp6|use-dns):' \
+          /etc/netplan/ 2>/dev/null | sed 's/^/netplan: /'
+        r=$(grep -rhs -E '^[[:space:]]*renderer:' /etc/netplan/ 2>/dev/null | awk '{print $2}' | tail -1)
+        echo "netplan.renderer=${r:-not set (дефолт дистрибутива)}"
+        grep -rqs -E '^[[:space:]]*nameservers:' /etc/netplan/ 2>/dev/null && echo "SOURCE=netplan"
+      else
+        echo "netplan=absent"
+      fi
 
-    # cloud-init
-    [ -e /etc/netplan/50-cloud-init.yaml ] && echo "cloudinit.netplan=yes"
-    if [ -e /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg ]; then
-      echo "cloudinit.network_config=disabled"
-    elif [ -d /etc/cloud ]; then
-      echo "cloudinit.network_config=enabled (перегенерирует сеть при загрузке)"
-    fi
+      # cloud-init
+      [ -e /etc/netplan/50-cloud-init.yaml ] && echo "cloudinit.netplan=yes"
+      if [ -e /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg ]; then
+        echo "cloudinit.network_config=disabled"
+      elif [ -d /etc/cloud ]; then
+        echo "cloudinit.network_config=enabled (перегенерирует сеть при загрузке)"
+      fi
 
-    # NetworkManager: режим dns=, активные соединения, профиль default-route устройства
-    if command -v nmcli >/dev/null 2>&1; then
-      m=$(grep -rhs -E '^[[:space:]]*dns[[:space:]]*=' /etc/NetworkManager/NetworkManager.conf \
-            /etc/NetworkManager/conf.d/ /usr/lib/NetworkManager/conf.d/ 2>/dev/null | tail -1 | tr -d ' ')
-      echo "nm.dns_mode=${m:-not set (default: NM пишет /etc/resolv.conf сам)}"
-      nmcli -t -f NAME,DEVICE,TYPE,STATE con show --active 2>/dev/null | sed 's/^/nm.active: /'
-      for d in $(ip -o route show default 2>/dev/null | awk '{print $5}' | sort -u); do
-        c=$(nmcli -t -f GENERAL.CONNECTION device show "$d" 2>/dev/null | cut -d: -f2-)
-        [ -n "$c" ] || continue
-        echo "nm.default_dev=$d connection=$c"
-        nmcli -t -f connection.filename,ipv4.method,ipv4.dns,ipv4.ignore-auto-dns,ipv4.dns-search,ipv6.method,ipv6.dns,ipv6.ignore-auto-dns \
-          con show "$c" 2>/dev/null | sed "s|^|nm.$d: |"
-        nmcli -t -f ipv4.dns,ipv6.dns con show "$c" 2>/dev/null | grep -qv ':$' && echo "SOURCE=networkmanager-profile"
+      # NetworkManager: режим dns=, активные соединения, профиль default-route устройства
+      if command -v nmcli >/dev/null 2>&1; then
+        m=$(grep -rhs -E '^[[:space:]]*dns[[:space:]]*=' /etc/NetworkManager/NetworkManager.conf \
+              /etc/NetworkManager/conf.d/ /usr/lib/NetworkManager/conf.d/ 2>/dev/null | tail -1 | tr -d ' ')
+        echo "nm.dns_mode=${m:-not set (default: NM пишет /etc/resolv.conf сам)}"
+        nmcli -t -f NAME,DEVICE,TYPE,STATE con show --active 2>/dev/null | sed 's/^/nm.active: /'
+        for d in $(ip -o route show default 2>/dev/null | awk '{print $5}' | sort -u); do
+          c=$(nmcli -t -f GENERAL.CONNECTION device show "$d" 2>/dev/null | cut -d: -f2-)
+          [ -n "$c" ] || continue
+          echo "nm.default_dev=$d connection=$c"
+          nmcli -t -f connection.filename,ipv4.method,ipv4.dns,ipv4.ignore-auto-dns,ipv4.dns-search,ipv6.method,ipv6.dns,ipv6.ignore-auto-dns \
+            con show "$c" 2>/dev/null | sed "s|^|nm.$d: |"
+          nmcli -t -f ipv4.dns,ipv6.dns con show "$c" 2>/dev/null | grep -qv ':$' && echo "SOURCE=networkmanager-profile"
+        done
+        # файлы профилей (keyfile)
+        grep -rns -E '^(dns|dns-search|ignore-auto-dns|method)=' \
+          /etc/NetworkManager/system-connections/ /run/NetworkManager/system-connections/ 2>/dev/null \
+          | sed 's/^/nm.keyfile: /'
+      else
+        echo "networkmanager=absent"
+      fi
+
+      # systemd-networkd
+      if [ -d /etc/systemd/network ] || [ -d /run/systemd/network ]; then
+        grep -rns -E '^[[:space:]]*(DNS|Domains|UseDNS|UseDomains)=' \
+          /etc/systemd/network/ /run/systemd/network/ /usr/lib/systemd/network/ 2>/dev/null | sed 's/^/networkd: /'
+        grep -rqs -E '^[[:space:]]*DNS=' /etc/systemd/network/ 2>/dev/null && echo "SOURCE=networkd"
+        command -v networkctl >/dev/null 2>&1 && \
+          networkctl --no-legend list 2>/dev/null | awk '{print "networkd.link=" $2 " oper:" $4 " setup:" $5}'
+      fi
+
+      # ifupdown
+      if [ -e /etc/network/interfaces ]; then
+        grep -rns -E 'dns-(nameservers|search|domain)' /etc/network/interfaces /etc/network/interfaces.d/ 2>/dev/null | sed 's/^/ifupdown: /'
+        grep -rqs -E 'dns-nameservers' /etc/network/interfaces /etc/network/interfaces.d/ 2>/dev/null && echo "SOURCE=ifupdown"
+      fi
+
+      # resolvconf/openresolv
+      for f in /etc/resolvconf/resolv.conf.d/head /etc/resolvconf/resolv.conf.d/base /etc/resolvconf/resolv.conf.d/tail; do
+        [ -s "$f" ] && sed "s|^|resolvconf $f: |" "$f"
       done
-      # keyfile'ы профилей
-      grep -rns -E '^(dns|dns-search|ignore-auto-dns|method)=' \
-        /etc/NetworkManager/system-connections/ /run/NetworkManager/system-connections/ 2>/dev/null \
-        | sed 's/^/nm.keyfile: /'
-    else
-      echo "networkmanager=absent"
-    fi
+      grep -rqs '^nameserver' /etc/resolvconf/resolv.conf.d/ 2>/dev/null && echo "SOURCE=resolvconf"
 
-    # systemd-networkd
-    if [ -d /etc/systemd/network ] || [ -d /run/systemd/network ]; then
-      grep -rns -E '^[[:space:]]*(DNS|Domains|UseDNS|UseDomains)=' \
-        /etc/systemd/network/ /run/systemd/network/ /usr/lib/systemd/network/ 2>/dev/null | sed 's/^/networkd: /'
-      grep -rqs -E '^[[:space:]]*DNS=' /etc/systemd/network/ 2>/dev/null && echo "SOURCE=networkd"
-      command -v networkctl >/dev/null 2>&1 && \
-        networkctl --no-legend list 2>/dev/null | awk '{print "networkd.link=" $2 " oper:" $4 " setup:" $5}'
-    fi
+      # DHCP: lease-файлы networkd и dhclient
+      for i in /run/systemd/netif/leases/*; do
+        [ -f "$i" ] || continue
+        d=$(grep -m1 '^DNS=' "$i" 2>/dev/null | cut -d= -f2)
+        [ -n "$d" ] && echo "dhcp.networkd.lease[$(basename "$i")].dns=$d"
+      done
+      d=$(grep -h 'option domain-name-servers' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*servers //; s/;//')
+      [ -n "$d" ] && echo "dhcp.dhclient.lease.dns=$d"
+      grep -rqs 'option domain-name-servers' /var/lib/dhcp/ 2>/dev/null && echo "SOURCE=dhcp"
+      ls /run/systemd/netif/leases/ >/dev/null 2>&1 && \
+        grep -rqs '^DNS=' /run/systemd/netif/leases/ 2>/dev/null && echo "SOURCE=dhcp"
 
-    # ifupdown
-    if [ -e /etc/network/interfaces ]; then
-      grep -rns -E 'dns-(nameservers|search|domain)' /etc/network/interfaces /etc/network/interfaces.d/ 2>/dev/null | sed 's/^/ifupdown: /'
-      grep -rqs -E 'dns-nameservers' /etc/network/interfaces /etc/network/interfaces.d/ 2>/dev/null && echo "SOURCE=ifupdown"
-    fi
+      # dhclient.conf
+      grep -rns -E '^[[:space:]]*(supersede|prepend|append)[[:space:]]+domain-(name-servers|search|name)' \
+        /etc/dhcp/ 2>/dev/null | sed 's/^/dhclient.conf: /'
+      grep -rqs -E '^[[:space:]]*(supersede|prepend)[[:space:]]+domain-name-servers' /etc/dhcp/ 2>/dev/null \
+        && echo "SOURCE=dhclient-conf-override"
 
-    # resolvconf/openresolv
-    for f in /etc/resolvconf/resolv.conf.d/head /etc/resolvconf/resolv.conf.d/base /etc/resolvconf/resolv.conf.d/tail; do
-      [ -s "$f" ] && sed "s|^|resolvconf $f: |" "$f"
-    done
-    grep -rqs '^nameserver' /etc/resolvconf/resolv.conf.d/ 2>/dev/null && echo "SOURCE=resolvconf"
+      # апстримы локальных резолверов
+      grep -rhs -E '^[[:space:]]*(server|address|no-resolv|resolv-file|strict-order)' \
+        /etc/dnsmasq.conf /etc/dnsmasq.d/ /etc/NetworkManager/dnsmasq.d/ /run/NetworkManager/dnsmasq.d/ 2>/dev/null \
+        | head -20 | sed 's/^/dnsmasq: /'
+      grep -rhs -E 'forward-(zone|addr|host)|do-not-query|stub-addr' /etc/unbound/ 2>/dev/null \
+        | head -20 | sed 's/^/unbound: /'
+      grep -rhs -E '^[[:space:]]*forwarders' -A5 /etc/bind/ 2>/dev/null | head -10 | sed 's/^/bind: /'
 
-    # DHCP: lease-файлы networkd и dhclient
-    for i in /run/systemd/netif/leases/*; do
-      [ -f "$i" ] || continue
-      d=$(grep -m1 '^DNS=' "$i" 2>/dev/null | cut -d= -f2)
-      [ -n "$d" ] && echo "dhcp.networkd.lease[$(basename "$i")].dns=$d"
-    done
-    d=$(grep -h 'option domain-name-servers' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*servers //; s/;//')
-    [ -n "$d" ] && echo "dhcp.dhclient.lease.dns=$d"
-    grep -rqs 'option domain-name-servers' /var/lib/dhcp/ 2>/dev/null && echo "SOURCE=dhcp"
-    ls /run/systemd/netif/leases/ >/dev/null 2>&1 && \
-      grep -rqs '^DNS=' /run/systemd/netif/leases/ 2>/dev/null && echo "SOURCE=dhcp"
-
-    # dhclient.conf
-    grep -rns -E '^[[:space:]]*(supersede|prepend|append)[[:space:]]+domain-(name-servers|search|name)' \
-      /etc/dhcp/ 2>/dev/null | sed 's/^/dhclient.conf: /'
-    grep -rqs -E '^[[:space:]]*(supersede|prepend)[[:space:]]+domain-name-servers' /etc/dhcp/ 2>/dev/null \
-      && echo "SOURCE=dhclient-conf-override"
-
-    # апстримы локальных резолверов
-    grep -rhs -E '^[[:space:]]*(server|address|no-resolv|resolv-file|strict-order)' \
-      /etc/dnsmasq.conf /etc/dnsmasq.d/ /etc/NetworkManager/dnsmasq.d/ /run/NetworkManager/dnsmasq.d/ 2>/dev/null \
-      | head -20 | sed 's/^/dnsmasq: /'
-    grep -rhs -E 'forward-(zone|addr|host)|do-not-query|stub-addr' /etc/unbound/ 2>/dev/null \
-      | head -20 | sed 's/^/unbound: /'
-    grep -rhs -E '^[[:space:]]*forwarders' -A5 /etc/bind/ 2>/dev/null | head -10 | sed 's/^/bind: /'
-
-    # docker / kubernetes
-    [ -e /etc/docker/daemon.json ] && grep -o '"dns"[^]]*]' /etc/docker/daemon.json 2>/dev/null | sed 's/^/docker: /'
-    [ -d /etc/kubernetes ] && echo "kubernetes=yes (нодовый DNS живёт отдельно от хостового)"
-    exit 0
-  args:
+      # docker / kubernetes
+      [ -e /etc/docker/daemon.json ] && grep -o '"dns"[^]]*]' /etc/docker/daemon.json 2>/dev/null | sed 's/^/docker: /'
+      [ -d /etc/kubernetes ] && echo "kubernetes=yes (нодовый DNS живёт отдельно от хостового)"
+      exit 0
     executable: /bin/bash
   register: _dnsa_sources
   changed_when: false
@@ -276,45 +276,45 @@
 
 - name: info | DNS - probe effective resolution
   become: true
-  shell: |
-    echo "== effective =="
-    ip -o route show default 2>/dev/null | awk '{print "default_route=" $5 " via " $3}'
+  shell:
+    cmd: |
+      echo "== effective =="
+      ip -o route show default 2>/dev/null | awk '{print "default_route=" $5 " via " $3}'
 
-    # апстримы: сначала resolved, иначе resolv.conf
-    srvs=$(resolvectl dns 2>/dev/null | sed 's/.*: //' | tr ' ' '\n' | grep -E '^[0-9a-fA-F:.]+$' | sort -u)
-    [ -z "$srvs" ] && srvs=$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null)
-    echo "EFFECTIVE=$(echo $srvs | tr '\n' ' ')"
+      # апстримы: сначала resolved, иначе resolv.conf
+      srvs=$(resolvectl dns 2>/dev/null | sed 's/.*: //' | tr ' ' '\n' | grep -E '^[0-9a-fA-F:.]+$' | sort -u)
+      [ -z "$srvs" ] && srvs=$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null)
+      echo "EFFECTIVE=$(echo $srvs | tr '\n' ' ')"
 
-    # имя для проверки; вырожденные search domain'ы отсеиваем
-    name="{{ dns_probe_name | default('') }}"
-    [ -z "$name" ] && name=$(awk '/^search/{print $2; exit}' /etc/resolv.conf 2>/dev/null)
-    case "$name" in
-      ''|'.'|*[!a-zA-Z0-9.-]*) name="" ;;
-    esac
-    if [ -z "$name" ]; then
-      echo "probe=skipped (нет пригодного search domain — передай dns_probe_name в Extra Variables)"
+      # имя для проверки; вырожденные search domain отсеиваем
+      name="{{ dns_probe_name | default('') }}"
+      [ -z "$name" ] && name=$(awk '/^search/{print $2; exit}' /etc/resolv.conf 2>/dev/null)
+      case "$name" in
+        ''|'.'|*[!a-zA-Z0-9.-]*) name="" ;;
+      esac
+      if [ -z "$name" ]; then
+        echo "probe=skipped (нет пригодного search domain — передай dns_probe_name в Extra Variables)"
+        exit 0
+      fi
+      echo "probe.name=$name"
+
+      # реальный запрос
+      if command -v resolvectl >/dev/null 2>&1 && systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        resolvectl query "$name" 2>&1 | head -8 | sed 's/^/probe.resolvectl: /'
+      fi
+      g=$(getent ahostsv4 "$name" 2>&1 | head -3)
+      echo "probe.getent=${g:-NO ANSWER}"
+
+      # доступность каждого апстрима
+      if command -v dig >/dev/null 2>&1; then
+        for s in $srvs; do
+          r=$(dig +time=2 +tries=1 +short @"$s" "$name" 2>&1 | head -1)
+          echo "probe.upstream[$s]=${r:-NO ANSWER}"
+        done
+      else
+        echo "probe.upstreams=skipped (dig не установлен)"
+      fi
       exit 0
-    fi
-    echo "probe.name=$name"
-
-    # реальный запрос
-    if command -v resolvectl >/dev/null 2>&1 && systemctl is-active --quiet systemd-resolved 2>/dev/null; then
-      resolvectl query "$name" 2>&1 | head -8 | sed 's/^/probe.resolvectl: /'
-    fi
-    g=$(getent ahostsv4 "$name" 2>&1 | head -3)
-    echo "probe.getent=${g:-NO ANSWER}"
-
-    # доступность каждого апстрима
-    if command -v dig >/dev/null 2>&1; then
-      for s in $srvs; do
-        r=$(dig +time=2 +tries=1 +short @"$s" "$name" 2>&1 | head -1)
-        echo "probe.upstream[$s]=${r:-NO ANSWER}"
-      done
-    else
-      echo "probe.upstreams=skipped (dig не установлен)"
-    fi
-    exit 0
-  args:
     executable: /bin/bash
   register: _dnsa_effective
   changed_when: false

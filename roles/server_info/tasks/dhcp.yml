@@ -45,7 +45,8 @@
   when: _dhcp_proc.stdout | length > 0
 
 - name: info | DHCP - get search domain from lease
-  shell: grep 'option domain-name ' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*domain-name //; s/[";]//g'
+  shell:
+    cmd: grep 'option domain-name ' /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -1 | sed 's/.*domain-name //; s/[";]//g'
   register: _dhcp_domain
   changed_when: false
   failed_when: false
