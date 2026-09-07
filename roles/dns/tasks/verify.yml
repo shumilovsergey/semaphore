@@ -1,48 +1,98 @@
 ---
 
-# Роль настраивает резолвер, но фактические адреса могут приходить и с сетевого
-# слоя (netplan/networkd, cloud-init, DHCP-клиент). Такая настройка перебивает
-# глобальную, поэтому проверяем не записанный файл, а то, что реально отвечает
-# на запросы. Разбор проблемы: tools/dns_role_problem.md
 
-- name: Get effective DNS servers (systemd-resolved)
-  shell: |
-    set -o pipefail
-    iface=$(resolvectl status | awk '/^Link [0-9]+ \(/{i=$3; gsub(/[()]/,"",i)} /\+DefaultRoute/{print i; exit}')
-    if [ -n "$iface" ]; then
-      resolvectl dns "$iface" | sed 's/.*: //'
-    else
-      resolvectl dns | awk -F': ' '/Global/{print $2}'
-    fi
-  args:
+- name: dns | read effective state
+  become: true
+  shell:
+    cmd: |
+      iface="{{ dns_state.iface }}"
+      if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        srv=$(resolvectl dns "$iface" 2>/dev/null | awk -F': ' 'NF>1{print $2}')
+        [ -z "$srv" ] && srv=$(resolvectl dns 2>/dev/null | awk -F': ' '/Global/ && NF>1 {print $2}')
+        dom=$(resolvectl domain "$iface" 2>/dev/null | awk -F': ' 'NF>1{print $2}')
+        [ -z "$dom" ] && dom=$(resolvectl domain 2>/dev/null | awk -F': ' '/Global/ && NF>1 {print $2}')
+      else
+        srv=$(awk '/^nameserver/{printf "%s ",$2}' /etc/resolv.conf 2>/dev/null)
+        dom=$(sed -n 's/^search[[:space:]]*//p' /etc/resolv.conf 2>/dev/null | tr '\n' ' ')
+      fi
+      printf 'servers: "%s"\ndomains: "%s"\n' "$srv" "$dom"
+      exit 0
     executable: /bin/bash
-  register: dns_effective_resolved
+  register: _dns_effective
   changed_when: false
-  when: dns_manager == 'systemd_resolved'
 
-- name: Get effective DNS servers (resolv.conf)
-  shell: "grep '^nameserver' /etc/resolv.conf | awk '{print $2}' | tr '\\n' ' '"
-  register: dns_effective_file
-  changed_when: false
-  when: dns_manager != 'systemd_resolved'
-
-- name: Collect effective DNS servers
+- name: dns | parse effective state
   set_fact:
-    dns_effective: >-
-      {{ ((dns_effective_resolved.stdout | default('')) if dns_manager == 'systemd_resolved'
-          else (dns_effective_file.stdout | default(''))).split() | sort }}
-    dns_expected: "{{ dns_servers | map('string') | sort }}"
+    dns_effective: "{{ _dns_effective.stdout | from_yaml }}"
 
-- name: Fail if effective DNS does not match dns_servers
+- name: dns | fail when effective servers differ from dns_servers
   fail:
     msg: >-
-      DNS config was written, but the resolver actually uses {{ dns_effective | join(' ') | default('nothing', true) }}
-      instead of {{ dns_expected | join(' ') }}.
-      Something else on this host supplies DNS with higher priority than the resolver config:
-      check the network layer (netplan/networkd, cloud-init, NetworkManager, DHCP)
-      and set the nameservers there as well. See tools/dns_role_problem.md
-  when: dns_effective != dns_expected
+      Конфиг записан, но резолвер использует [{{ dns_effective.servers | trim }}]
+      вместо [{{ dns_servers | join(' ') }}]. Значит DNS этому хосту отдаёт слой
+      выше выбранного backend'а ({{ dns_backend_effective }}).
+      Запусти server_info metric=dns — маркеры SOURCE= покажут, какой именно.
+  when: (dns_effective.servers.split() | sort) != (dns_servers | map('string') | sort)
 
-- name: Effective DNS matches declared dns_servers
+- name: dns | fail when search domain is not applied
+  fail:
+    msg: >-
+      Адреса совпали, но search domain — [{{ dns_effective.domains | trim }}]
+      вместо '{{ dns_domain }}'. Домен приезжает с другого слоя.
+  when:
+    - dns_domain | length > 0
+    - dns_domain not in dns_effective.domains.split()
+
+# Прописанный, но недостижимый сервер (закрыт файрволом или просто выключен)
+# конфигом не ловится — на 10.2.11.24 в парке это уже случалось.
+- name: dns | probe each nameserver
+  become: true
+  shell:
+    cmd: |
+      name="{{ dns_probe_name | default('') }}"
+      if [ -z "$name" ] || ! command -v dig >/dev/null 2>&1; then
+        printf 'checked: "no"\nalive: ""\ndead: ""\n'
+        exit 0
+      fi
+      alive=""; dead=""
+      for s in {{ dns_servers | join(' ') }}; do
+        if dig +time=2 +tries=1 +short @"$s" "$name" >/dev/null 2>&1; then
+          alive="$alive $s"
+        else
+          dead="$dead $s"
+        fi
+      done
+      printf 'checked: "yes"\nalive: "%s"\ndead: "%s"\n' "$alive" "$dead"
+      exit 0
+    executable: /bin/bash
+  register: _dns_reach
+  changed_when: false
+
+- name: dns | parse reachability
+  set_fact:
+    dns_reach: "{{ _dns_reach.stdout | from_yaml }}"
+
+- name: dns | fail when no nameserver answers
+  fail:
+    msg: >-
+      Ни один из {{ dns_servers | join(' ') }} не ответил на запрос
+      {{ dns_probe_name }}. Адреса записаны, но резолвинг работать не будет.
+  when:
+    - dns_reach.checked == 'yes'
+    - dns_reach.alive | trim | length == 0
+
+- name: dns | warn about unreachable nameservers
   debug:
-    msg: "Effective DNS: {{ dns_effective | join(' ') }}"
+    msg: >-
+      ВНИМАНИЕ: не отвечают [{{ dns_reach.dead | trim }}]. Хост работает на
+      оставшихся, но резерва нет.
+  when:
+    - dns_reach.checked == 'yes'
+    - dns_reach.dead | trim | length > 0
+
+- name: dns | report success
+  debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ dns_backend_effective }} —
+      DNS [{{ dns_effective.servers | trim }}], search [{{ dns_effective.domains | trim }}]
+      {%- if dns_reach.checked == 'yes' %}, отвечают [{{ dns_reach.alive | trim }}]{% endif %}

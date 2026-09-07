@@ -1,0 +1,14 @@
+# Managed by Ansible role dns. Правки будут затёрты.
+#
+# 99- перебивает nameservers из 00-installer-config.yaml
+# или 50-cloud-init.yaml, ничего в них не редактируя. Файл cloud-init к тому же
+# перегенерируется при каждой загрузке, и ручные правки в нём не переживают ребут.
+network:
+  version: 2
+  ethernets:
+    {{ dns_state.iface }}:
+      nameservers:
+        addresses: [{{ dns_servers | join(', ') }}]
+{% if dns_domain %}
+        search: [{{ dns_domain }}]
+{% endif %}
