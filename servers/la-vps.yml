@@ -21,9 +21,6 @@ nft_allow_input_extra:
   - { port: 35152, proto: udp, comment: "amnezia awg" }
 
 nft_input_raw:
-  - |
-    chain prerouting {
-        ip saddr 172.29.172.0/24 accept comment "allow container outbound"
-        ip saddr 10.8.1.0/24 udp dport 53 accept comment "allow dns from vpn clients"
-        ip saddr 10.8.1.0/24 tcp dport 53 accept comment "allow dns from vpn clients"
-    }
+  - "ip saddr 172.29.172.0/24 accept"
+  - "ip saddr 10.8.1.0/24 udp dport 53 accept"
+  - "ip saddr 10.8.1.0/24 tcp dport 53 accept"
