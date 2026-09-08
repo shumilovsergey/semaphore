@@ -21,3 +21,10 @@ nft_allow_input_extra:
   - { port: 35152, proto: udp, comment: "amnezia awg" }
   - { port: 53, proto: udp, from: "10.8.0.0/24", comment: "dns vpn clients udp" }
   - { port: 53, proto: tcp, from: "10.8.0.0/24", comment: "dns vpn clients tcp" }
+
+
+nft_input_raw:
+  - "iifname { awg*, wg* } udp dport 53 accept comment 'allow dns from vpn interfaces'"
+  - "iifname { awg*, wg* } tcp dport 53 accept comment 'allow dns from vpn interfaces'"
+  - "fib daddr type local accept comment 'allow traffic destined to local host'"
+  - "fib saddr type local accept comment 'allow traffic originating from local host'"
