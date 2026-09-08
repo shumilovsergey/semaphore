@@ -20,7 +20,7 @@ nft_allow_input_extra:
   - { port: 38331, proto: udp, comment: "amnezia wireguard" }
   - { port: 35152, proto: udp, comment: "amnezia awg" }
 
-nft_table_raw:
+nft_input_raw:
   - |
     chain prerouting {
         ip saddr 172.29.172.0/24 accept comment "allow container outbound"
