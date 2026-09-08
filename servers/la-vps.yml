@@ -2,6 +2,7 @@
 
 #---roles
 server_roles:
+  - nft
   - autossh_identity
   - nginx_certbot
 
@@ -10,6 +11,11 @@ server_roles:
 certbot_email: wumilovsergey@gmail.com
 vpn_allow_ip: 5.189.254.175
 
-nginx_sites:
-  # public
-  - { name: poc-telegram-auth, domain: poc-telegram-auth.sh-development.ru, port: 8000, vpn_only: false }
+
+nft_allow_input_extra:
+  - { port: [80, 443], comment: "web" }
+  - { port: 4444, comment: "amnezia xray" }
+  - { port: 35605, comment: "amnezia shadowsocks tcp" }
+  - { port: 35605, comment: "amnezia shadowsocks udp" }
+  - { port: 38331, comment: "amnezia wireguard" }
+  - { port: 35152, comment: "amnezia awg" }
