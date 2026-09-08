@@ -19,3 +19,5 @@ nft_allow_input_extra:
   - { port: 35605, proto: udp, comment: "amnezia shadowsocks udp" }
   - { port: 38331, proto: udp, comment: "amnezia wireguard" }
   - { port: 35152, proto: udp, comment: "amnezia awg" }
+  - { port: 53, proto: udp, from: "10.8.0.0/24", comment: "dns vpn clients udp" }
+  - { port: 53, proto: tcp, from: "10.8.0.0/24", comment: "dns vpn clients tcp" }
