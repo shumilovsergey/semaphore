@@ -24,7 +24,7 @@ nft_allow_input_extra:
 
 
 nft_input_raw:
-  - "iifname { awg*, wg* } udp dport 53 accept comment 'allow dns from vpn interfaces'"
-  - "iifname { awg*, wg* } tcp dport 53 accept comment 'allow dns from vpn interfaces'"
-  - "fib daddr type local accept comment 'allow traffic destined to local host'"
-  - "fib saddr type local accept comment 'allow traffic originating from local host'"
+  - "iifname { awg*, wg* } udp dport 53 accept"
+  - "iifname { awg*, wg* } tcp dport 53 accept"
+  - "fib daddr type local accept"
+  - "fib saddr type local accept"
