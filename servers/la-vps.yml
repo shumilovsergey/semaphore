@@ -19,10 +19,11 @@ nft_allow_input_extra:
   - { port: 35605, proto: udp, comment: "amnezia shadowsocks udp" }
   - { port: 38331, proto: udp, comment: "amnezia wireguard" }
   - { port: 35152, proto: udp, comment: "amnezia awg" }
-  - { port: 53, proto: udp, from: "10.8.0.0/24", comment: "dns vpn clients udp" }
-  - { port: 53, proto: tcp, from: "10.8.0.0/24", comment: "dns vpn clients tcp" }
 
-
-nft_input_raw:
-  - "fib daddr type local accept"
-  - "fib saddr type local accept"
+nft_table_raw:
+  - |
+    chain prerouting {
+        ip saddr 172.29.172.0/24 accept comment "allow container outbound"
+        ip saddr 10.8.1.0/24 udp dport 53 accept comment "allow dns from vpn clients"
+        ip saddr 10.8.1.0/24 tcp dport 53 accept comment "allow dns from vpn clients"
+    }
