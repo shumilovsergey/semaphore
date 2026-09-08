@@ -15,7 +15,7 @@ vpn_allow_ip: 5.189.254.175
 nft_allow_input_extra:
   - { port: [80, 443], comment: "web" }
   - { port: 4444, comment: "amnezia xray" }
-  - { port: 35605, comment: "amnezia shadowsocks tcp" }
-  - { port: 35605, comment: "amnezia shadowsocks udp" }
-  - { port: 38331, comment: "amnezia wireguard" }
-  - { port: 35152, comment: "amnezia awg" }
+  - { port: 35605, proto: tcp, comment: "amnezia shadowsocks tcp" }
+  - { port: 35605, proto: udp, comment: "amnezia shadowsocks udp" }
+  - { port: 38331, proto: udp, comment: "amnezia wireguard" }
+  - { port: 35152, proto: udp, comment: "amnezia awg" }
