@@ -34,7 +34,7 @@ nft_allow_dhcp: true
 # Пример: { port: [80, 443], proto: tcp, from: "10.0.0.0/8", comment: "web" }
 nft_allow_input:
   - { port: 22, comment: "ssh" }
-
+  - { port: 9100, comment: "node_exporter" }
 
 # Чтобы прокинуть уникальное правило servers/..yml
 nft_allow_input_extra: []
