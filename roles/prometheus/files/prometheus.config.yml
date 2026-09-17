@@ -84,3 +84,11 @@ scrape_configs:
       - targets: ['10.10.30.165:9324']
         labels:
           server: 'home-lab'
+  
+  # amnezia
+  - job_name: amneziawg
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ['5.189.254.175:9351']
+        labels:
+          server: 'la-vps'

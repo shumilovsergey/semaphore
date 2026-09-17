@@ -4,13 +4,8 @@
 server_roles:
   - nft
   - autossh_identity
-  - nginx_certbot
 
 #---vars
-
-certbot_email: wumilovsergey@gmail.com
-vpn_allow_ip: 5.189.254.175
-
 
 nft_allow_input_extra:
   - { port: [80, 443], comment: "web" }
@@ -19,6 +14,7 @@ nft_allow_input_extra:
   - { port: 35605, proto: udp, comment: "amnezia shadowsocks udp" }
   - { port: 38331, proto: udp, comment: "amnezia wireguard" }
   - { port: 35152, proto: udp, comment: "amnezia awg" }
+  - { port: 9351, proto: tcp, comment: "exporter awg" }
 
 nft_input_raw:
   - "ip saddr 172.29.172.0/24 accept"
