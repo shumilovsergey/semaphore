@@ -2,7 +2,6 @@
 
 #---roles
 server_roles:
-  - nginx_certbot
   - nft
   - alloy
   - autossh_identity
