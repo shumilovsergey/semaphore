@@ -42,6 +42,7 @@ nft_allow_input_extra:
   - { port: 9256, comment: "process exporter" }
   - { port: 35605, comment: "soks-tun" }
   - { port: 35152, comment: "awg-tun" }
+  - { port: 3128, comment: "ghost-proxy"}
 
 # -- alloy --------------------------
 alloy_snippets: [system, nginx]
