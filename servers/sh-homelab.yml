@@ -3,10 +3,10 @@
 #---roles
 server_roles:
   - prometheus
-  - loki
+  # - loki
   - grafana
-  - alloy
-  - smtp_worker
+  # - alloy
+  # - smtp_worker
   - node_exporter
   - autossh_identity
   - autossh
