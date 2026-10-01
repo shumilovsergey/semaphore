@@ -3,7 +3,7 @@
 #---roles
 server_roles:
   - nft
-  - alloy
+  # - alloy
   - autossh_identity
 
 #---vars
