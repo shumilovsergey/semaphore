@@ -9,7 +9,7 @@ server_roles:
 #---vars
 
 certbot_email: wumilovsergey@gmail.com
-vpn_allow_ip: 5.189.254.175
+vpn_allow_ip: 45.131.41.34
 
 nginx_sites:
   # public
@@ -25,6 +25,7 @@ nginx_sites:
   - { name: nom-nom, domain: nom-nom.sh-development.ru, port: 9001, vpn_only: false }
   - { name: qcode, domain: qcode.sh-development.ru, port: 9106, vpn_only: false }
   # privat
+  - { name: openvas, domain: openvas.sh-development.ru, port: 3001, vpn_only: true }
   - { name: semaphore, domain: semaphore.sh-development.ru, port: 9005, vpn_only: true }
   - { name: buba-cloud, domain: buba-cloud.sh-development.ru, port: 9102, vpn_only: true }
   - { name: gitea, domain: gitea.sh-development.ru, port: 9004, vpn_only: true }
