@@ -5,3 +5,4 @@ brainstorm
 __pycache__/
 tools/manual_dns_changes.md
 .claude/playbooks/deckhouse-cluster/s3/artifacts/
+.claude/*

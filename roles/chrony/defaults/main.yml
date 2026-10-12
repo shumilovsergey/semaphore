@@ -20,7 +20,8 @@ chrony_service_file_path: "/etc/systemd/system/chronyd.service"
 chrony_bin_path: "{{ chrony_path }}/chronyd"
 chronyc_bin_path: "{{ chrony_path }}/chronyc"
 chrony_config_path: "{{ chrony_path }}/chrony.conf"
-service_user: service_ansible
+# это важно - нужны права
+service_user: root
 
 # Бинари не качаются: лежат на сервере Semaphore в хранилище bin_store_dir
 # (задаётся в Environment проекта). Файл без версии в имени — подменили

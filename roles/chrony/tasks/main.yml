@@ -18,8 +18,6 @@
 # одновременно подстраивать часы. Если chronyd после старта не
 # синхронизировался, rescue возвращает timesyncd и роль падает.
 #
-# chronyd стартует от root и сам сбрасывает права до service_user,
-# оставляя себе только CAP_SYS_TIME, поэтому User= в юните нет.
 
 - name: Fail if bin_store_dir is not set
   fail:
