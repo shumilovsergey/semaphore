@@ -1,4 +1,0 @@
----
-# Группа vps — обычные Linux-серверы. Вся логика в _linux.yml.
-- name: "vps - linux key rotation"
-  ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/_linux.yml"
