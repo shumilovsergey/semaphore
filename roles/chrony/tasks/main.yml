@@ -1,0 +1,222 @@
+# Ставит chronyd как NTP-клиент из бинаря в хранилище на сервере Semaphore.
+#
+# Ожидает:
+#   - bin_store_dir в Environment проекта Semaphore;
+#   - в хранилище <bin_store_dir>/chrony/chronyd и chronyc из одной сборки.
+#     Бинари из deb/rpm собраны динамически (libcap, libseccomp, gnutls,
+#     nettle, libedit) — берите их из самого старого дистрибутива парка.
+#     Если библиотек на хосте нет, роль упадёт на проверке `chronyd -v`
+#     раньше, чем что-то запустит.
+#
+# Отказывается работать:
+#   - в LXC/OpenVZ — у контейнера нет CAP_SYS_TIME, часы ведёт хост;
+#   - при установленном пакете chrony/ntp/ntpsec/openntpd — два NTP-демона
+#     на одном хосте; в Debian пакет к тому же держит алиас chronyd.service,
+#     и template писал бы через симлинк в файл пакета.
+#
+# systemd-timesyncd останавливается и выключается: два клиента не должны
+# одновременно подстраивать часы. Если chronyd после старта не
+# синхронизировался, rescue возвращает timesyncd и роль падает.
+#
+# chronyd стартует от root и сам сбрасывает права до service_user,
+# оставляя себе только CAP_SYS_TIME, поэтому User= в юните нет.
+
+- name: Fail if bin_store_dir is not set
+  fail:
+    msg: "bin_store_dir не задан — добавьте его в Environment проекта в Semaphore"
+  when: bin_store_dir is not defined
+
+- name: Fail if no time sources are configured
+  fail:
+    msg: "chrony_pools и chrony_servers оба пустые — chronyd не к кому ходить за временем"
+  when: (chrony_pools | length + chrony_servers | length) == 0
+
+- name: Refuse to run in a container
+  fail:
+    msg: >
+      {{ inventory_hostname }} — контейнер {{ ansible_virtualization_type }}:
+      часы ведёт хост, chronyd здесь не сможет их менять.
+      Уберите chrony из servers/{{ inventory_hostname }}.yml.
+  when:
+    - ansible_virtualization_role | default('') == 'guest'
+    - ansible_virtualization_type | default('') in ['lxc', 'openvz']
+
+- name: Check for packaged NTP daemons
+  stat:
+    path: "{{ item }}"
+  loop:
+    - /lib/systemd/system/chrony.service
+    - /lib/systemd/system/chronyd.service
+    - /usr/lib/systemd/system/chrony.service
+    - /usr/lib/systemd/system/chronyd.service
+    - /lib/systemd/system/ntp.service
+    - /lib/systemd/system/ntpsec.service
+    - /lib/systemd/system/openntpd.service
+    - /usr/lib/systemd/system/ntpd.service
+  register: chrony_packaged_units
+
+- name: Fail if a packaged NTP daemon is installed
+  fail:
+    msg: >
+      На {{ inventory_hostname }} стоит NTP-демон из пакета:
+      {{ chrony_packaged_units.results | selectattr('stat.exists') | map(attribute='item') | map('basename') | unique | join(', ') }}.
+      Удалите пакет (apt purge chrony / ntp / ntpsec / openntpd) и перезапустите роль.
+  when: chrony_packaged_units.results | selectattr('stat.exists') | list | length > 0
+
+- name: Check chrony binaries in the store
+  stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ chrony_store_chronyd }}"
+    - "{{ chrony_store_chronyc }}"
+  register: chrony_store
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if chrony binaries are missing from the store
+  fail:
+    msg: >
+      Нет в хранилище на сервере Semaphore:
+      {{ chrony_store.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+  when: chrony_store.results | rejectattr('stat.exists') | list | length > 0
+  run_once: true
+
+- name: Collect service state
+  service_facts:
+
+- name: Create chrony directory
+  file:
+    path: "{{ chrony_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Check if service already exists
+  stat:
+    path: "{{ chrony_service_file_path }}"
+  register: chrony_service_file
+
+- name: Upload chrony binaries to the host
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0755"
+  loop:
+    - { src: "{{ chrony_store_chronyd }}", dest: "{{ chrony_bin_path }}" }
+    - { src: "{{ chrony_store_chronyc }}", dest: "{{ chronyc_bin_path }}" }
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Restart chronyd
+
+- name: Check that chrony binaries run on this host
+  command: "{{ item }} -v"
+  loop:
+    - "{{ chrony_bin_path }}"
+    - "{{ chronyc_bin_path }}"
+  register: chrony_bin_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if chrony binaries do not run
+  fail:
+    msg: >
+      {{ item.item }} не запускается на {{ inventory_hostname }}
+      ({{ ansible_distribution }} {{ ansible_distribution_version }}):
+      {{ item.stderr | default(item.msg) }}.
+      Скорее всего бинарь собран под другой дистрибутив — нет нужных библиотек.
+  loop: "{{ chrony_bin_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
+
+- name: Set ownership on chrony directory
+  file:
+    path: "{{ chrony_path }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    recurse: yes
+
+- name: Deploy chrony config
+  template:
+    src: chrony.conf.j2
+    dest: "{{ chrony_config_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+    validate: "{{ chrony_bin_path }} -p -f %s"
+  notify: Restart chronyd
+
+- name: Deploy systemd service file
+  template:
+    src: chronyd.service.j2
+    dest: "{{ chrony_service_file_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: chrony_service_deployed
+  notify: Restart chronyd
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: chrony_service_deployed.changed
+
+- name: Remember timesyncd state
+  set_fact:
+    chrony_timesyncd_was_active: "{{ ansible_facts.services['systemd-timesyncd.service'].state | default('') == 'running' }}"
+    chrony_timesyncd_was_enabled: "{{ ansible_facts.services['systemd-timesyncd.service'].status | default('') == 'enabled' }}"
+
+- name: Switch time sync to chronyd
+  block:
+    - name: Stop and disable systemd-timesyncd
+      systemd:
+        name: systemd-timesyncd
+        state: stopped
+        enabled: no
+      when: chrony_timesyncd_was_active or chrony_timesyncd_was_enabled
+
+    - name: Enable and start service (first run)
+      systemd:
+        name: chronyd
+        state: started
+        enabled: yes
+      when: not chrony_service_file.stat.exists
+
+    - name: Apply pending restart before health check
+      meta: flush_handlers
+
+    - name: Wait for chronyd to synchronize
+      command: "{{ chronyc_bin_path }} -h 127.0.0.1 -n waitsync {{ chrony_sync_tries }} 0 0 5"
+      changed_when: false
+
+  rescue:
+    - name: Stop and disable chronyd (first run)
+      systemd:
+        name: chronyd
+        state: stopped
+        enabled: no
+      when: not chrony_service_file.stat.exists
+
+    - name: Bring systemd-timesyncd back
+      systemd:
+        name: systemd-timesyncd
+        state: "{{ 'started' if chrony_timesyncd_was_active else omit }}"
+        enabled: "{{ chrony_timesyncd_was_enabled }}"
+      when: chrony_timesyncd_was_active or chrony_timesyncd_was_enabled
+
+    - name: Fail after rollback
+      fail:
+        msg: >
+          chronyd не синхронизировался за {{ chrony_sync_tries * 5 }} с.
+          {{ 'systemd-timesyncd возвращён. ' if (chrony_timesyncd_was_active or chrony_timesyncd_was_enabled) else '' }}
+          Смотрите journalctl -u chronyd и доступность источников:
+          {{ (chrony_pools + chrony_servers) | join(', ') }} (UDP 123 наружу).
+
+- name: Read chronyd tracking
+  command: "{{ chronyc_bin_path }} -h 127.0.0.1 -n tracking"
+  register: chrony_tracking
+  changed_when: false
+
+- name: Show chronyd status
+  debug:
+    msg: "{{ chrony_tracking.stdout_lines }}"

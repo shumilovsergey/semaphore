@@ -3,37 +3,9 @@
 #---roles
 server_roles:
   - nft
-  # - alloy
-  - autossh_identity
+  - chrony
 
 #---vars
-
-certbot_email: wumilovsergey@gmail.com
-vpn_allow_ip: 45.131.41.34
-
-nginx_sites:
-  # public
-  - { name: bite, domain: bite.sh-development.ru, port: 9007, vpn_only: false }
-  - { name: menu, domain: menu.sh-development.ru, port: 9006, vpn_only: false }
-  - { name: auth-center, domain: auth-center.sh-development.ru, port: 9103, vpn_only: false }
-  - { name: auth, domain: auth.sh-development.ru, port: 9104, vpn_only: false }
-  - { name: blur, domain: blur.sh-development.ru, port: 9002, vpn_only: false }
-  - { name: wgetbash, domain: wgetbash.sh-development.ru, port: 9105, vpn_only: false }
-  - { name: youtrack, domain: youtrack.sh-development.ru, port: 9999, vpn_only: false }
-  - { name: zhenshen, domain: zhenshen.sh-development.ru, port: 10001, vpn_only: false }
-  - { name: sendbox, domain: sendbox.sh-development.ru, port: 9101, vpn_only: false }
-  - { name: nom-nom, domain: nom-nom.sh-development.ru, port: 9001, vpn_only: false }
-  - { name: qcode, domain: qcode.sh-development.ru, port: 9106, vpn_only: false }
-  # privat
-  - { name: openvas, domain: openvas.sh-development.ru, port: 3001, vpn_only: true }
-  - { name: semaphore, domain: semaphore.sh-development.ru, port: 9005, vpn_only: true }
-  - { name: buba-cloud, domain: buba-cloud.sh-development.ru, port: 9102, vpn_only: true }
-  - { name: gitea, domain: gitea.sh-development.ru, port: 9004, vpn_only: true }
-  - { name: grafana, domain: grafana.sh-development.ru, port: 3000, vpn_only: true }
-  - { name: prometheus, domain: prometheus.sh-development.ru, port: 9090, vpn_only: true }
-  - { name: vault, domain: vault.sh-development.ru, port: 9000, vpn_only: true }
-  - { name: loki, domain: loki.sh-development.ru, port: 9107, vpn_only: true }
-  - { name: grafana2, domain: grafana2.sh-development.ru, port: 9108, vpn_only: true }
 
 nft_allow_input_extra:
   - { port: 80, comment: "http" }
@@ -44,12 +16,6 @@ nft_allow_input_extra:
   - { port: 35152, comment: "awg-tun" }
   - { port: 3128, comment: "ghost-proxy"}
 
-# -- alloy --------------------------
-alloy_snippets: [system, nginx]
-
-alloy_keep_expressions:
-  # ssh
-  - "Accepted (publickey|password) for"
 
 
 

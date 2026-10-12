@@ -1,0 +1,14 @@
+[Unit]
+Description=chrony NTP client
+After=network-online.target
+Wants=network-online.target
+Conflicts=systemd-timesyncd.service
+
+[Service]
+Type=simple
+ExecStart={{ chrony_bin_path }} -n -u {{ service_user }} -f {{ chrony_config_path }}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

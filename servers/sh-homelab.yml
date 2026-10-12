@@ -2,14 +2,10 @@
 
 #---roles
 server_roles:
+  - chrony
   - prometheus
-  # - loki
   - grafana
-  # - alloy
-  # - smtp_worker
   - node_exporter
-  - autossh_identity
-  - autossh
 
 #---vars
 
@@ -34,15 +30,5 @@ grafana_datasources:
   - {name: prometheus, type: prometheus, url: "http://127.0.0.1:9090", isDefault: true, scrape_interval: "60s"}
   - {name: loki, type: loki, url: "http://127.0.0.1:9107"}
 
-# -- loki ---------------------------
-loki_port: "9107"
 
-# -- alloy --------------------------
-alloy_snippets: [system]
 
-alloy_keep_expressions:
-  # ssh
-  - "Accepted (publickey|password) for"
-  # cron tasks loki
-  - "playbook=github_clone status=failed"
-  - "playbook=backup_sync status=failed"

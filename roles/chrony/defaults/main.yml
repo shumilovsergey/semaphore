@@ -1,0 +1,29 @@
+# Источники времени. pool — DNS-имя, за которым несколько серверов
+# (chronyd берёт до 4 адресов), server — один конкретный сервер.
+# Переопределяются в servers/<hostname>.yml, например:
+#   chrony_pools: []
+#   chrony_servers:
+#     - 10.10.30.1
+chrony_pools:
+  - pool.ntp.org
+chrony_servers: []
+
+# Шаг вместо плавной подстройки, если расхождение больше 1 с,
+# но только в первые 3 обновления после старта
+chrony_makestep: "1.0 3"
+
+# Сколько раз по 5 секунд ждать синхронизации в health check
+chrony_sync_tries: 24
+
+chrony_path: "/opt/chrony"
+chrony_service_file_path: "/etc/systemd/system/chronyd.service"
+chrony_bin_path: "{{ chrony_path }}/chronyd"
+chronyc_bin_path: "{{ chrony_path }}/chronyc"
+chrony_config_path: "{{ chrony_path }}/chrony.conf"
+service_user: service_ansible
+
+# Бинари не качаются: лежат на сервере Semaphore в хранилище bin_store_dir
+# (задаётся в Environment проекта). Файл без версии в имени — подменили
+# файл в хранилище, при следующем прогоне copy увидит другую checksum.
+chrony_store_chronyd: "{{ bin_store_dir }}/chrony/chronyd"
+chrony_store_chronyc: "{{ bin_store_dir }}/chrony/chronyc"

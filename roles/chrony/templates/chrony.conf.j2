@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+
+{% for pool in chrony_pools %}
+pool {{ pool }} iburst
+{% endfor %}
+{% for server in chrony_servers %}
+server {{ server }} iburst
+{% endfor %}
+
+driftfile {{ chrony_path }}/drift
+pidfile {{ chrony_path }}/chronyd.pid
+makestep {{ chrony_makestep }}
+rtcsync
+
+# только клиент: NTP-порт не слушаем
+port 0
+
+# chronyc ходит по UDP на 127.0.0.1:323, unix-сокет выключен
+bindcmdaddress 127.0.0.1
+bindcmdaddress /
