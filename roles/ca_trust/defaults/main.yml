@@ -1,9 +1,5 @@
-# PEM корневого сертификата. Задаётся в Environment проекта Semaphore,
-# в Extra variables — одной JSON-строкой с \n вместо переносов:
-#   {"ca_trust_pem": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"}
-# Получить такую строку из файла:
-#   jq -Rs . vm-root-ca.crt
-# ca_trust_pem:
+# PEM корневого сертификата на контроллере Ansible (машина Semaphore)
+ca_trust_src: /opt/ansible-bin/certs/vm-root-ca.crt
 
 # Имя файла в системном хранилище (без .crt)
 ca_trust_name: vm-root-ca

@@ -1,7 +1,7 @@
 # Добавляет корневой сертификат в системное хранилище доверия хоста.
 #
 # Ожидает:
-#   - ca_trust_pem в Environment проекта Semaphore (формат — в defaults);
+#   - PEM-файл ca_trust_src на контроллере Ansible (не на целевом хосте);
 #   - openssl и пакет ca-certificates на хосте (роль их не ставит).
 #
 # Отказывается работать:
@@ -20,10 +20,18 @@
 # Смена ca_trust_name не удаляет старый файл — старый CA остаётся доверенным.
 #
 
-- name: Fail if ca_trust_pem is not set
+- name: Check CA certificate on controller
+  stat:
+    path: "{{ ca_trust_src }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: ca_trust_src_stat
+
+- name: Fail if CA certificate is missing on controller
   fail:
-    msg: "ca_trust_pem не задан — добавьте его в Extra variables Environment проекта в Semaphore (формат — roles/ca_trust/defaults/main.yml)"
-  when: ca_trust_pem is not defined or ca_trust_pem | trim | length == 0
+    msg: "На контроллере Ansible нет файла {{ ca_trust_src }} (или он пустой) — положите туда PEM корневого CA"
+  when: not ca_trust_src_stat.stat.exists or ca_trust_src_stat.stat.size == 0
 
 - name: Fail on unsupported OS
   fail:
@@ -55,7 +63,7 @@
   block:
     - name: Copy CA certificate
       copy:
-        content: "{{ ca_trust_pem | trim }}\n"
+        src: "{{ ca_trust_src }}"
         dest: "{{ ca_trust_layout.dir }}/{{ ca_trust_name }}.crt"
         owner: root
         group: root
@@ -67,9 +75,9 @@
     - name: Fail on invalid certificate
       fail:
         msg: >
-          ca_trust_pem не прошёл проверку: это не PEM-сертификат или в нём нет CA:TRUE
-          (сертификат сайта вместо CA?). Проверить локально:
-          openssl x509 -noout -text -in vm-root-ca.crt | grep CA:
+          {{ ca_trust_src }} не прошёл проверку: это не PEM-сертификат или в нём нет CA:TRUE
+          (сертификат сайта вместо CA?). Проверить на контроллере:
+          openssl x509 -noout -text -in {{ ca_trust_src }} | grep CA:
           Файл на хосте не изменён.
 
 - name: Apply pending trust update before check
