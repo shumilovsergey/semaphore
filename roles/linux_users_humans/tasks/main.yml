@@ -24,6 +24,9 @@
 # и /etc/sudoers.d/<пользователь Ansible> (его кладёт
 # tools/ansible-client-init.sh). Если этого файла нет, роль падает до
 # любых изменений — иначе зачистка могла бы отнять у Ansible sudo.
+# Чужие файлы не удаляются, а переносятся в
+# linux_users_humans_removed_dir/sudoers.d-<время>/ — вернуть можно mv обратно.
+# linux_users_humans_ignore их не спасает: он защищает учётку, а не её sudo.
 # Членство в группах (sudo, wheel, docker) роль не трогает.
 #
 # ~/.ssh принадлежит пользователю, и симлинком он мог бы направить запись
@@ -234,11 +237,24 @@
     hidden: true
   register: linux_users_humans_sudoers_d
 
-- name: Remove foreign sudoers drop-ins
+- name: Pick foreign sudoers drop-ins
+  set_fact:
+    linux_users_humans_sudoers_foreign: >-
+      {{ linux_users_humans_sudoers_d.files | map(attribute='path')
+         | reject('in', ['/etc/sudoers.d/README', linux_users_humans_sudoers_file,
+                         '/etc/sudoers.d/' ~ linux_users_humans_self]) | list }}
+    linux_users_humans_sudoers_backup: "{{ linux_users_humans_removed_dir }}/sudoers.d-{{ ansible_facts.date_time.iso8601_basic_short }}"
+
+- name: Create directory for removed sudoers drop-ins
   file:
-    path: "{{ item }}"
-    state: absent
-  loop: >-
-    {{ linux_users_humans_sudoers_d.files | map(attribute='path')
-       | reject('in', ['/etc/sudoers.d/README', linux_users_humans_sudoers_file,
-                       '/etc/sudoers.d/' ~ linux_users_humans_self]) | list }}
+    path: "{{ linux_users_humans_sudoers_backup }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: linux_users_humans_sudoers_foreign | length > 0
+
+- name: Move foreign sudoers drop-ins aside
+  command:
+    argv: [mv, --, "{{ item }}", "{{ linux_users_humans_sudoers_backup }}/"]
+  loop: "{{ linux_users_humans_sudoers_foreign }}"
