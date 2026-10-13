@@ -1,0 +1,16 @@
+# Создаёт системного пользователя для сервисов: UID из системного диапазона,
+# без дома, без входа. linux_users_humans его не видит — UID ниже UID_MIN.
+#
+# Не входит в run.yml: перечисляется в server_roles там, где нужен, и
+# стоит перед ролями сервисов — они делают chown и пишут User= в unit.
+#
+# Существующего пользователя не пересоздаёт и UID не меняет.
+#
+
+- name: Create service user
+  user:
+    name: "{{ linux_users_service_name }}"
+    system: true
+    shell: "{{ linux_users_service_shell }}"
+    create_home: false
+    state: present

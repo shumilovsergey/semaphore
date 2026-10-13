@@ -1,0 +1,5 @@
+# Системный пользователь, от которого работают сервисы (tools/RULES.md, п. 1).
+# Его ждут по умолчанию prometheus, node_exporter, grafana, loki, smtp_worker
+# (service_user: service_ansible в их defaults).
+linux_users_service_name: service_ansible
+linux_users_service_shell: /sbin/nologin

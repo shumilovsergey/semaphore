@@ -2,9 +2,10 @@
 
 #---roles
 server_roles:
+  - linux_users_humans
   - nft
   - chrony
-  - linux_users_humans
+
 
 #---vars
 
