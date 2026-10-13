@@ -4,6 +4,7 @@
 server_roles:
   - nft
   - chrony
+  - linux_users_humans
 
 #---vars
 
@@ -17,5 +18,10 @@ nft_allow_input_extra:
   - { port: 3128, comment: "ghost-proxy"}
 
 
+linux_users_humans_admins:
+  - sh
 
-
+linux_users_humans_ignore:
+  - github
+  - ssh-tunnel
+  - github-runner

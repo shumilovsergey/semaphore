@@ -29,7 +29,6 @@
   roles:
     # preflight всегда первым, для всех серверов
     - preflight
-    - service_user
 
   tasks:
     - name: Warn if no per-server config found

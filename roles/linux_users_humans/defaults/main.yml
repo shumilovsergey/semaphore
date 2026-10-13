@@ -1,0 +1,23 @@
+
+linux_users_humans_keys:
+  sh:
+    - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDRbtkrKow6WRhXQeyKAX4ZrL2Za4WaZeIH/Cd983QHdNpLJgcJEK/Q6f8oo+Rje5/+QUzQ3SCpcUZ/jR2v7rkfvTW48/OH7IzltMjh8LdRSxOoKvQ7f1Icz/cCOyym3Cs3FmX+ODRWD25l6XZI2GkcMFC5Qx/ekZMgVIXZoRyk7iLNznUMXo9XKsjhqAt8mSUqLWNx/FfFf7ZqNYK9VPzXPFG0Quio1qpdcfQhQIc2Hpw5QkIfwVHoXzaDwGY7GRB5ozyV/ukctGU+c24ctXb1KRKEeO1i9O2Wn6GMLFQTh+GCVBwxPki4QqNTevWf3pGAxo7rZ/u5hDZZF/yUIgqbjiMW8Qm1YXvi4kmtSQ+T83kf9Mb5qgbhWQiLKJa9lVzFgbmCSHYnvls5tB+LFZ4GkHF57XOT9pI+JO+M4BczVnJsJmqbZ253F2u5hV78dkArks1UBENUJtx1B1BZQnsSJLnRjEYT51C7QEAL8W9o6y9la8ykIaAtUbu7TE2vm+8= sh@Shumilovs-MacBook-Air.local"
+#  sa.shumilov:
+#    - "ssh-ed25519 AAAA... sa.shumilov@laptop"
+#    - "ssh-ed25519 AAAA... sa.shumilov@work"
+
+# Кто есть на сервере. Задаются в servers/<hostname>.yml.
+# Остальные люди (UID в диапазоне UID_MIN..UID_MAX из /etc/login.defs)
+# удаляются, их дома уезжают в linux_users_humans_removed_dir.
+# Пользователь, под которым заходит Ansible, и root не трогаются никогда.
+#
+# Кого роль считает людьми (то есть кандидатами на удаление) — посмотреть
+# на сервере до первого прогона:
+#   awk -F: '$3 >= 1000 && $3 < 60000 {print $1, $3, $6}' /etc/passwd
+# Всё из вывода, чего нет ни в одном списке ниже, будет удалено.
+linux_users_humans_admins: []   # дом + ключи + sudo без пароля
+linux_users_humans_users: []    # дом + ключи
+linux_users_humans_ignore: []
+
+linux_users_humans_removed_dir: /home/.removed
+linux_users_humans_sudoers_file: /etc/sudoers.d/linux_users_humans
