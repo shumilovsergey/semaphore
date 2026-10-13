@@ -1,0 +1,96 @@
+# Добавляет корневой сертификат в системное хранилище доверия хоста.
+#
+# Ожидает:
+#   - ca_trust_pem в Environment проекта Semaphore (формат — в defaults);
+#   - openssl и пакет ca-certificates на хосте (роль их не ставит).
+#
+# Отказывается работать:
+#   - на ОС не из ca_trust_layouts;
+#   - если PEM не разбирается как X.509 или это не CA (нет CA:TRUE) —
+#     проверка идёт через validate, до того как файл попадёт на место;
+#   - если после пересборки bundle сертификат не проходит openssl verify.
+#     Так же упадёт промежуточный CA: verify требует цепочку до
+#     самоподписанного корня, а роль кладёт один сертификат.
+#
+# Доверие получают те, кто читает системный bundle: curl, wget, apt, Go,
+# Python ssl. Своё хранилище у Java (cacerts), Node (NODE_EXTRA_CA_CERTS),
+# Python requests/certifi и Docker для registry (/etc/docker/certs.d) —
+# их роль не трогает.
+#
+# Смена ca_trust_name не удаляет старый файл — старый CA остаётся доверенным.
+#
+
+- name: Fail if ca_trust_pem is not set
+  fail:
+    msg: "ca_trust_pem не задан — добавьте его в Extra variables Environment проекта в Semaphore (формат — roles/ca_trust/defaults/main.yml)"
+  when: ca_trust_pem is not defined or ca_trust_pem | trim | length == 0
+
+- name: Fail on unsupported OS
+  fail:
+    msg: >
+      ca_trust не знает, где хранилище доверия для os_family={{ ansible_facts.os_family }}
+      ({{ ansible_facts.distribution }}). Поддерживаются: {{ ca_trust_layouts.keys() | join(', ') }}.
+  when: ansible_facts.os_family not in ca_trust_layouts
+
+- name: Pick trust store layout
+  set_fact:
+    ca_trust_layout: "{{ ca_trust_layouts[ansible_facts.os_family] }}"
+
+- name: Check required tools
+  shell:
+    cmd: command -v openssl && command -v {{ ca_trust_layout.update_cmd.split()[0] }}
+    executable: /bin/bash
+  register: ca_trust_tools
+  changed_when: false
+  failed_when: false
+
+- name: Fail if required tools are missing
+  fail:
+    msg: >
+      На {{ inventory_hostname }} нет openssl или {{ ca_trust_layout.update_cmd.split()[0] }}.
+      Поставьте пакеты openssl и ca-certificates и перезапустите роль.
+  when: ca_trust_tools.rc != 0
+
+- name: Install CA certificate
+  block:
+    - name: Copy CA certificate
+      copy:
+        content: "{{ ca_trust_pem | trim }}\n"
+        dest: "{{ ca_trust_layout.dir }}/{{ ca_trust_name }}.crt"
+        owner: root
+        group: root
+        mode: "0644"
+        validate: sh -c 'openssl x509 -noout -text -in "$1" | grep -q "CA:TRUE"' sh %s
+      notify: Update CA trust
+
+  rescue:
+    - name: Fail on invalid certificate
+      fail:
+        msg: >
+          ca_trust_pem не прошёл проверку: это не PEM-сертификат или в нём нет CA:TRUE
+          (сертификат сайта вместо CA?). Проверить локально:
+          openssl x509 -noout -text -in vm-root-ca.crt | grep CA:
+          Файл на хосте не изменён.
+
+- name: Apply pending trust update before check
+  meta: flush_handlers
+
+- name: Check that the CA is trusted
+  command:
+    argv:
+      - openssl
+      - verify
+      - -CAfile
+      - "{{ ca_trust_layout.bundle }}"
+      - "{{ ca_trust_layout.dir }}/{{ ca_trust_name }}.crt"
+  register: ca_trust_verify
+  changed_when: false
+  failed_when: false
+
+- name: Fail if the CA is not trusted
+  fail:
+    msg: >
+      {{ ca_trust_name }} не попал в {{ ca_trust_layout.bundle }}:
+      {{ ca_trust_verify.stdout }} {{ ca_trust_verify.stderr }}.
+      Если это промежуточный CA — нужен корневой.
+  when: ca_trust_verify.rc != 0

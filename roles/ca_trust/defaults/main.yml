@@ -1,0 +1,24 @@
+# PEM корневого сертификата. Задаётся в Environment проекта Semaphore,
+# в Extra variables — одной JSON-строкой с \n вместо переносов:
+#   {"ca_trust_pem": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"}
+# Получить такую строку из файла:
+#   jq -Rs . vm-root-ca.crt
+# ca_trust_pem:
+
+# Имя файла в системном хранилище (без .crt)
+ca_trust_name: vm-root-ca
+
+# Раскладка по os_family: куда класть, чем пересобрать bundle, где bundle
+ca_trust_layouts:
+  Debian:
+    dir: /usr/local/share/ca-certificates
+    update_cmd: update-ca-certificates
+    bundle: /etc/ssl/certs/ca-certificates.crt
+  Alpine:
+    dir: /usr/local/share/ca-certificates
+    update_cmd: update-ca-certificates
+    bundle: /etc/ssl/certs/ca-certificates.crt
+  RedHat:
+    dir: /etc/pki/ca-trust/source/anchors
+    update_cmd: update-ca-trust extract
+    bundle: /etc/pki/tls/certs/ca-bundle.crt
