@@ -14,9 +14,14 @@
 #     на одном хосте; в Debian пакет к тому же держит алиас chronyd.service,
 #     и template писал бы через симлинк в файл пакета.
 #
+# Каждый прогон одинаковый: бинари, конфиг и unit переписываются, chronyd
+# перезапускается и включается. Первого запуска и обновления роль не
+# различает — что задано в servers/<hostname>.yml, то и будет на хосте.
+#
 # systemd-timesyncd останавливается и выключается: два клиента не должны
-# одновременно подстраивать часы. Если chronyd после старта не
-# синхронизировался, rescue возвращает timesyncd и роль падает.
+# одновременно подстраивать часы. Если chronyd после рестарта не
+# синхронизировался, rescue выключает chronyd, включает timesyncd (если он
+# есть на хосте) и роль падает — хост не остаётся без синхронизации.
 #
 
 - name: Fail if bin_store_dir is not set
@@ -88,11 +93,6 @@
     state: directory
     mode: "0755"
 
-- name: Check if service already exists
-  stat:
-    path: "{{ chrony_service_file_path }}"
-  register: chrony_service_file
-
 - name: Upload chrony binaries to the host
   copy:
     src: "{{ item.src }}"
@@ -103,7 +103,6 @@
     - { src: "{{ chrony_store_chronyc }}", dest: "{{ chronyc_bin_path }}" }
   loop_control:
     label: "{{ item.dest }}"
-  notify: Restart chronyd
 
 - name: Check that chrony binaries run on this host
   command: "{{ item }} -v"
@@ -142,7 +141,6 @@
     group: "{{ service_user }}"
     mode: "0644"
     validate: "{{ chrony_bin_path }} -p -f %s"
-  notify: Restart chronyd
 
 - name: Deploy systemd service file
   template:
@@ -151,18 +149,6 @@
     owner: root
     group: root
     mode: "0644"
-  register: chrony_service_deployed
-  notify: Restart chronyd
-
-- name: Reload systemd daemon
-  systemd:
-    daemon_reload: yes
-  when: chrony_service_deployed.changed
-
-- name: Remember timesyncd state
-  set_fact:
-    chrony_timesyncd_was_active: "{{ ansible_facts.services['systemd-timesyncd.service'].state | default('') == 'running' }}"
-    chrony_timesyncd_was_enabled: "{{ ansible_facts.services['systemd-timesyncd.service'].status | default('') == 'enabled' }}"
 
 - name: Switch time sync to chronyd
   block:
@@ -171,42 +157,38 @@
         name: systemd-timesyncd
         state: stopped
         enabled: no
-      when: chrony_timesyncd_was_active or chrony_timesyncd_was_enabled
+      when: "'systemd-timesyncd.service' in ansible_facts.services"
 
-    - name: Enable and start service (first run)
+    - name: Restart and enable chronyd
       systemd:
         name: chronyd
-        state: started
+        state: restarted
         enabled: yes
-      when: not chrony_service_file.stat.exists
-
-    - name: Apply pending restart before health check
-      meta: flush_handlers
+        daemon_reload: yes
 
     - name: Wait for chronyd to synchronize
       command: "{{ chronyc_bin_path }} -h 127.0.0.1 -n waitsync {{ chrony_sync_tries }} 0 0 5"
       changed_when: false
 
   rescue:
-    - name: Stop and disable chronyd (first run)
+    - name: Stop and disable chronyd
       systemd:
         name: chronyd
         state: stopped
         enabled: no
-      when: not chrony_service_file.stat.exists
 
     - name: Bring systemd-timesyncd back
       systemd:
         name: systemd-timesyncd
-        state: "{{ 'started' if chrony_timesyncd_was_active else omit }}"
-        enabled: "{{ chrony_timesyncd_was_enabled }}"
-      when: chrony_timesyncd_was_active or chrony_timesyncd_was_enabled
+        state: started
+        enabled: yes
+      when: "'systemd-timesyncd.service' in ansible_facts.services"
 
     - name: Fail after rollback
       fail:
         msg: >
-          chronyd не синхронизировался за {{ chrony_sync_tries * 5 }} с.
-          {{ 'systemd-timesyncd возвращён. ' if (chrony_timesyncd_was_active or chrony_timesyncd_was_enabled) else '' }}
+          chronyd не синхронизировался за {{ chrony_sync_tries * 5 }} с и выключен.
+          {{ 'Включён systemd-timesyncd. ' if 'systemd-timesyncd.service' in ansible_facts.services else 'systemd-timesyncd на хосте нет — время сейчас не синхронизируется. ' }}
           Смотрите journalctl -u chronyd и доступность источников:
           {{ (chrony_pools + chrony_servers) | join(', ') }} (UDP 123 наружу).
 
