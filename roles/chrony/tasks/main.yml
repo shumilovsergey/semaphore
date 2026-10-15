@@ -87,6 +87,10 @@
 - name: Collect service state
   service_facts:
 
+- name: Detect systemd-timesyncd
+  set_fact:
+    chrony_timesyncd_present: "{{ ansible_facts.services['systemd-timesyncd.service'].status | default('not-found') != 'not-found' }}"
+
 - name: Create chrony directory
   file:
     path: "{{ chrony_path }}"
@@ -157,7 +161,7 @@
         name: systemd-timesyncd
         state: stopped
         enabled: no
-      when: "'systemd-timesyncd.service' in ansible_facts.services"
+      when: chrony_timesyncd_present | bool
 
     - name: Restart and enable chronyd
       systemd:
@@ -182,13 +186,13 @@
         name: systemd-timesyncd
         state: started
         enabled: yes
-      when: "'systemd-timesyncd.service' in ansible_facts.services"
+      when: chrony_timesyncd_present | bool
 
     - name: Fail after rollback
       fail:
         msg: >
           chronyd не синхронизировался за {{ chrony_sync_tries * 5 }} с и выключен.
-          {{ 'Включён systemd-timesyncd. ' if 'systemd-timesyncd.service' in ansible_facts.services else 'systemd-timesyncd на хосте нет — время сейчас не синхронизируется. ' }}
+          {{ 'Включён systemd-timesyncd. ' if chrony_timesyncd_present | bool else 'systemd-timesyncd на хосте нет — время сейчас не синхронизируется. ' }}
           Смотрите journalctl -u chronyd и доступность источников:
           {{ (chrony_pools + chrony_servers) | join(', ') }} (UDP 123 наружу).
 
