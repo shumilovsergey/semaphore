@@ -1,8 +1,13 @@
-# Приводит людей на сервере строго к списку из servers/<hostname>.yml:
+# Заводит людей из servers/<hostname>.yml:
 #   linux_users_humans_admins — дом, ключи, sudo без пароля;
 #   linux_users_humans_users  — дом, ключи.
 # Ключи берутся из linux_users_humans_keys (defaults), authorized_keys
-# переписывается целиком.
+# переписывается целиком. Новый пользователь создаётся, у существующего
+# переписываются только authorized_keys.
+#
+# По умолчанию (linux_users_humans_clean_up: false) роль только добавляет:
+# лишних людей и чужие файлы в sudoers.d не трогает. Всё ниже про удаление
+# и зачистку sudoers.d — только при linux_users_humans_clean_up: true.
 #
 # Человек — пользователь из /etc/passwd с UID в UID_MIN..UID_MAX из
 # /etc/login.defs. Системные и сервисные учётки (UID ниже) роль не видит,
@@ -86,7 +91,9 @@
   stat:
     path: "/etc/sudoers.d/{{ linux_users_humans_self }}"
   register: linux_users_humans_self_sudoers
-  when: linux_users_humans_self != 'root'
+  when:
+    - linux_users_humans_clean_up | bool
+    - linux_users_humans_self != 'root'
 
 - name: Fail if the Ansible user has no sudoers drop-in
   fail:
@@ -95,82 +102,86 @@
       кроме этого файла и своего, — без него Ansible потеряет sudo.
       Запустите на хосте tools/ansible-client-init.sh.
   when:
+    - linux_users_humans_clean_up | bool
     - linux_users_humans_self != 'root'
     - not linux_users_humans_self_sudoers.stat.exists
 
-- name: List human users
-  shell:
-    cmd: |
-      min=$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs)
-      max=$(awk '$1 == "UID_MAX" {print $2}' /etc/login.defs)
-      awk -F: -v min="${min:-1000}" -v max="${max:-60000}" '$3 >= min && $3 <= max {print $1 ":" $3 ":" $6}' /etc/passwd
-    executable: /bin/bash
-  register: linux_users_humans_present
-  changed_when: false
+- name: Clean up users not in the lists
+  when: linux_users_humans_clean_up | bool
+  block:
+    - name: List human users
+      shell:
+        cmd: |
+          min=$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs)
+          max=$(awk '$1 == "UID_MAX" {print $2}' /etc/login.defs)
+          awk -F: -v min="${min:-1000}" -v max="${max:-60000}" '$3 >= min && $3 <= max {print $1 ":" $3 ":" $6}' /etc/passwd
+        executable: /bin/bash
+      register: linux_users_humans_present
+      changed_when: false
 
-# элементы — [имя, uid, home]
-- name: Pick users to remove
-  set_fact:
-    linux_users_humans_extra: >-
-      {{ linux_users_humans_present.stdout_lines | map('split', ':')
-         | rejectattr('0', 'in', linux_users_humans_wanted + linux_users_humans_protected) | list }}
+    # элементы — [имя, uid, home]
+    - name: Pick users to remove
+      set_fact:
+        linux_users_humans_extra: >-
+          {{ linux_users_humans_present.stdout_lines | map('split', ':')
+             | rejectattr('0', 'in', linux_users_humans_wanted + linux_users_humans_protected) | list }}
 
-- name: Show users to remove
-  debug:
-    msg: "Удаляются: {{ linux_users_humans_extra | map(attribute='0') | join(', ') }}"
-  when: linux_users_humans_extra | length > 0
+    - name: Show users to remove
+      debug:
+        msg: "Удаляются: {{ linux_users_humans_extra | map(attribute='0') | join(', ') }}"
+      when: linux_users_humans_extra | length > 0
 
-- name: Check homes of removed users
-  stat:
-    path: "{{ item.2 }}"
-    follow: false
-  loop: "{{ linux_users_humans_extra }}"
-  loop_control:
-    label: "{{ item.0 }}"
-  register: linux_users_humans_extra_homes
+    - name: Check homes of removed users
+      stat:
+        path: "{{ item.2 }}"
+        follow: false
+      loop: "{{ linux_users_humans_extra }}"
+      loop_control:
+        label: "{{ item.0 }}"
+      register: linux_users_humans_extra_homes
 
-- name: Kill processes of removed users
-  command:
-    argv: [pkill, -KILL, -u, "{{ item.0 }}"]
-  loop: "{{ linux_users_humans_extra }}"
-  loop_control:
-    label: "{{ item.0 }}"
-  register: linux_users_humans_pkill
-  changed_when: linux_users_humans_pkill.rc == 0
-  failed_when: linux_users_humans_pkill.rc > 1
+    - name: Kill processes of removed users
+      command:
+        argv: [pkill, -KILL, -u, "{{ item.0 }}"]
+      loop: "{{ linux_users_humans_extra }}"
+      loop_control:
+        label: "{{ item.0 }}"
+      register: linux_users_humans_pkill
+      changed_when: linux_users_humans_pkill.rc == 0
+      failed_when: linux_users_humans_pkill.rc > 1
 
-- name: Remove users
-  user:
-    name: "{{ item.0 }}"
-    state: absent
-    remove: false
-    force: true
-  loop: "{{ linux_users_humans_extra }}"
-  loop_control:
-    label: "{{ item.0 }}"
+    - name: Remove users
+      user:
+        name: "{{ item.0 }}"
+        state: absent
+        remove: false
+        force: true
+      loop: "{{ linux_users_humans_extra }}"
+      loop_control:
+        label: "{{ item.0 }}"
 
-- name: Create directory for removed homes
-  file:
-    path: "{{ linux_users_humans_removed_dir }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0700"
-  when: linux_users_humans_extra | length > 0
+    - name: Create directory for removed homes
+      file:
+        path: "{{ linux_users_humans_removed_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: linux_users_humans_extra | length > 0
 
-- name: Move homes of removed users aside
-  shell:
-    cmd: |
-      dest={{ (linux_users_humans_removed_dir ~ '/' ~ item.item.0 ~ '-' ~ ansible_facts.date_time.iso8601_basic_short) | quote }}
-      mv -- {{ item.stat.path | quote }} "$dest"
-      chown -R root:root "$dest"
-    executable: /bin/bash
-  loop: "{{ linux_users_humans_extra_homes.results }}"
-  loop_control:
-    label: "{{ item.item.0 }}"
-  when:
-    - item.stat.isdir | default(false)
-    - item.stat.uid == item.item.1 | int
+    - name: Move homes of removed users aside
+      shell:
+        cmd: |
+          dest={{ (linux_users_humans_removed_dir ~ '/' ~ item.item.0 ~ '-' ~ ansible_facts.date_time.iso8601_basic_short) | quote }}
+          mv -- {{ item.stat.path | quote }} "$dest"
+          chown -R root:root "$dest"
+        executable: /bin/bash
+      loop: "{{ linux_users_humans_extra_homes.results }}"
+      loop_control:
+        label: "{{ item.item.0 }}"
+      when:
+        - item.stat.isdir | default(false)
+        - item.stat.uid == item.item.1 | int
 
 - name: Create users
   user:
@@ -230,31 +241,34 @@
     mode: "0440"
     validate: visudo -cf %s
 
-- name: Find sudoers drop-ins
-  find:
-    paths: /etc/sudoers.d
-    file_type: any
-    hidden: true
-  register: linux_users_humans_sudoers_d
+- name: Clean up sudoers.d
+  when: linux_users_humans_clean_up | bool
+  block:
+    - name: Find sudoers drop-ins
+      find:
+        paths: /etc/sudoers.d
+        file_type: any
+        hidden: true
+      register: linux_users_humans_sudoers_d
 
-- name: Pick foreign sudoers drop-ins
-  set_fact:
-    linux_users_humans_sudoers_foreign: >-
-      {{ linux_users_humans_sudoers_d.files | map(attribute='path')
-         | reject('in', ['/etc/sudoers.d/README', linux_users_humans_sudoers_file,
-                         '/etc/sudoers.d/' ~ linux_users_humans_self]) | list }}
-    linux_users_humans_sudoers_backup: "{{ linux_users_humans_removed_dir }}/sudoers.d-{{ ansible_facts.date_time.iso8601_basic_short }}"
+    - name: Pick foreign sudoers drop-ins
+      set_fact:
+        linux_users_humans_sudoers_foreign: >-
+          {{ linux_users_humans_sudoers_d.files | map(attribute='path')
+             | reject('in', ['/etc/sudoers.d/README', linux_users_humans_sudoers_file,
+                             '/etc/sudoers.d/' ~ linux_users_humans_self]) | list }}
+        linux_users_humans_sudoers_backup: "{{ linux_users_humans_removed_dir }}/sudoers.d-{{ ansible_facts.date_time.iso8601_basic_short }}"
 
-- name: Create directory for removed sudoers drop-ins
-  file:
-    path: "{{ linux_users_humans_sudoers_backup }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0700"
-  when: linux_users_humans_sudoers_foreign | length > 0
+    - name: Create directory for removed sudoers drop-ins
+      file:
+        path: "{{ linux_users_humans_sudoers_backup }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      when: linux_users_humans_sudoers_foreign | length > 0
 
-- name: Move foreign sudoers drop-ins aside
-  command:
-    argv: [mv, --, "{{ item }}", "{{ linux_users_humans_sudoers_backup }}/"]
-  loop: "{{ linux_users_humans_sudoers_foreign }}"
+    - name: Move foreign sudoers drop-ins aside
+      command:
+        argv: [mv, --, "{{ item }}", "{{ linux_users_humans_sudoers_backup }}/"]
+      loop: "{{ linux_users_humans_sudoers_foreign }}"

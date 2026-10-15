@@ -6,9 +6,15 @@ linux_users_humans_keys:
 #    - "ssh-ed25519 AAAA... sa.shumilov@laptop"
 #    - "ssh-ed25519 AAAA... sa.shumilov@work"
 
+# false — только создать недостающих и переписать authorized_keys.
+# true  — привести сервер строго к спискам: лишних людей удалить,
+#         чужие файлы из sudoers.d унести (см. ниже и шапку tasks/main.yml).
+linux_users_humans_clean_up: false
+
 # Кто есть на сервере. Задаются в servers/<hostname>.yml.
-# Остальные люди (UID в диапазоне UID_MIN..UID_MAX из /etc/login.defs)
-# удаляются, их дома уезжают в linux_users_humans_removed_dir.
+# При linux_users_humans_clean_up: true остальные люди (UID в диапазоне
+# UID_MIN..UID_MAX из /etc/login.defs) удаляются, их дома уезжают
+# в linux_users_humans_removed_dir.
 # Пользователь, под которым заходит Ansible, и root не трогаются никогда.
 #
 # Кого роль считает людьми (то есть кандидатами на удаление) — посмотреть
