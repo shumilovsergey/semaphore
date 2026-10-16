@@ -1,0 +1,278 @@
+# Ставит haproxy как балансировщик: терминирует TLS wildcard-сертификатами
+# и раскидывает запросы по Host на группы нод (ingress кубернетиса).
+#
+# Ожидает:
+#   - bin_store_dir в Environment проекта Semaphore;
+#   - в хранилище <bin_store_dir>/haproxy/haproxy и сертификаты с ключами
+#     в <bin_store_dir>/certs/ — пути к ним в haproxy_certs;
+#   - openssl на контроллере, ss (iproute2) на хосте;
+#   - открытые в nft порты http/https — nft_allow_input_extra этого же
+#     сервера, nft в server_roles раньше haproxy.
+#
+# Отказывается работать:
+#   - при установленном пакете haproxy — наш unit под тем же именем молча
+#     перекрыл бы пакетный;
+#   - если порты http/https/stats уже слушает не haproxy;
+#   - если ключ не от сертификата или сертификат уже истёк — проверка
+#     идёт на контроллере, до того как что-то попадёт на хост;
+#   - если конфиг не проходит haproxy -c — живой haproxy остаётся со
+#     старым конфигом.
+#
+# Каждый прогон одинаковый: бинарь, сертификаты, конфиг и unit
+# переписываются, а если хоть что-то из этого изменилось — haproxy
+# перезапускается (рвёт текущие соединения). Без изменений — только
+# проверяется, что служба запущена и включена.
+#
+# Маршрут выбирается по заголовку Host, а не по SNI: с wildcard-сертификатом
+# браузер переиспользует одно HTTP/2-соединение для разных поддоменов, и SNI
+# остаётся от первого запроса.
+#
+# PEM на хосте = crt + key одним файлом (так его читает haproxy), лежит в
+# haproxy_certs_dir с правами 0600. PEM, убранные из haproxy_certs,
+# удаляются — ключи не остаются на диске.
+#
+
+- name: Fail if bin_store_dir is not set
+  fail:
+    msg: "bin_store_dir не задан — добавьте его в Environment проекта в Semaphore"
+  when: bin_store_dir is not defined
+
+- name: Fail if config is incomplete
+  fail:
+    msg: "haproxy_certs, haproxy_backends и haproxy_routes должны быть заданы в servers/{{ inventory_hostname }}.yml"
+  when: haproxy_certs | length == 0 or haproxy_backends | length == 0 or haproxy_routes | length == 0
+
+- name: Fail if a backend is malformed
+  fail:
+    msg: "Backend {{ item.name | default(item) }}: нужны name, port и непустой servers"
+  loop: "{{ haproxy_backends }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+  when: item.name is not defined or item.port is not defined or item.servers | default([]) | length == 0
+
+- name: Fail if names are not unique
+  fail:
+    msg: "Повторяются имена в haproxy_backends или haproxy_certs"
+  when: >
+    haproxy_backends | map(attribute='name') | unique | length != haproxy_backends | length or
+    haproxy_certs | map(attribute='name') | unique | length != haproxy_certs | length
+
+- name: Fail if a route points to an unknown backend
+  fail:
+    msg: >
+      Маршрут {{ item.hosts | default([]) | join(', ') }} ведёт в backend '{{ item.backend | default('') }}',
+      а в haproxy_backends есть только: {{ haproxy_backends | map(attribute='name') | join(', ') }}
+  loop: "{{ haproxy_routes + ([{'hosts': ['default_backend'], 'backend': haproxy_default_backend}] if haproxy_default_backend else []) }}"
+  loop_control:
+    label: "{{ item.hosts | default([]) | join(', ') }}"
+  when: item.hosts | default([]) | length == 0 or item.backend | default('') not in haproxy_backends | map(attribute='name') | list
+
+- name: Check for packaged haproxy
+  stat:
+    path: "{{ item }}"
+  loop:
+    - /lib/systemd/system/haproxy.service
+    - /usr/lib/systemd/system/haproxy.service
+  register: haproxy_packaged_units
+
+- name: Fail if packaged haproxy is installed
+  fail:
+    msg: >
+      На {{ inventory_hostname }} стоит haproxy из пакета
+      ({{ haproxy_packaged_units.results | selectattr('stat.exists') | map(attribute='item') | join(', ') }}).
+      Удалите пакет (apt purge haproxy) и перезапустите роль.
+  when: haproxy_packaged_units.results | selectattr('stat.exists') | list | length > 0
+
+- name: Check haproxy binary in the store
+  stat:
+    path: "{{ haproxy_store_bin }}"
+  register: haproxy_store
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if haproxy binary is missing from the store
+  fail:
+    msg: "Нет в хранилище на сервере Semaphore: {{ haproxy_store_bin }}"
+  when: not haproxy_store.stat.exists
+  run_once: true
+
+- name: Check certificates on the controller
+  shell:
+    cmd: |
+      crt={{ (haproxy_store_certs_dir ~ '/' ~ item.crt) | quote }}
+      key={{ (haproxy_store_certs_dir ~ '/' ~ item.key) | quote }}
+      test -s "$crt" || { echo "нет файла $crt"; exit 1; }
+      test -s "$key" || { echo "нет файла $key"; exit 1; }
+      # сертификат и ключ разбираются и подходят друг другу
+      crt_pub=$(openssl x509 -noout -pubkey -in "$crt") || { echo "$crt не PEM-сертификат"; exit 1; }
+      key_pub=$(openssl pkey -pubout -in "$key" -passin pass:) || { echo "$key не читается: не PEM или с паролем"; exit 1; }
+      [ "$crt_pub" = "$key_pub" ] || { echo "$key не от сертификата $crt"; exit 1; }
+      openssl x509 -noout -checkend 0 -in "$crt" >/dev/null || { echo "$crt истёк"; exit 1; }
+      # что показать в логе
+      openssl x509 -noout -subject -enddate -ext subjectAltName -in "$crt"
+    executable: /bin/bash
+  loop: "{{ haproxy_certs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: haproxy_cert_check
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+
+- name: Fail if a certificate is not usable
+  fail:
+    msg: "Сертификат {{ item.item.name }}: {{ item.stdout }} {{ item.stderr }}"
+  loop: "{{ haproxy_cert_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+
+- name: Show certificates
+  debug:
+    msg: "{{ haproxy_cert_check.results | map(attribute='stdout_lines') | list }}"
+
+- name: Check who listens on haproxy ports
+  shell:
+    cmd: |
+      ss -Hltnp '( sport = :{{ haproxy_http_port }} or sport = :{{ haproxy_https_port }} or sport = :{{ haproxy_stats_port }} )' | grep -v '"haproxy"' || true
+    executable: /bin/bash
+  register: haproxy_port_owners
+  changed_when: false
+
+- name: Fail if ports are taken by something else
+  fail:
+    msg: >
+      Порты haproxy на {{ inventory_hostname }} уже заняты:
+      {{ haproxy_port_owners.stdout_lines | join('; ') }}.
+      Остановите и выключите этот сервис (nginx?) и перезапустите роль.
+  when: haproxy_port_owners.stdout | length > 0
+
+- name: Create haproxy directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ haproxy_path }}"
+    - "{{ haproxy_certs_dir }}"
+
+- name: Upload haproxy binary to the host
+  copy:
+    src: "{{ haproxy_store_bin }}"
+    dest: "{{ haproxy_bin_path }}"
+    mode: "0755"
+  register: haproxy_bin
+
+- name: Check that haproxy binary runs on this host
+  command: "{{ haproxy_bin_path }} -v"
+  register: haproxy_bin_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail if haproxy binary does not run
+  fail:
+    msg: >
+      {{ haproxy_bin_path }} не запускается на {{ inventory_hostname }}
+      ({{ ansible_distribution }} {{ ansible_distribution_version }}):
+      {{ haproxy_bin_check.stderr or haproxy_bin_check.msg | default('') }}
+  when: haproxy_bin_check.rc != 0
+
+- name: Deploy certificates
+  copy:
+    content: |
+      {{ lookup('file', haproxy_store_certs_dir ~ '/' ~ item.crt) }}
+      {{ lookup('file', haproxy_store_certs_dir ~ '/' ~ item.key) }}
+    dest: "{{ haproxy_certs_dir }}/{{ item.name }}.pem"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0600"
+  loop: "{{ haproxy_certs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: haproxy_cert_files
+  no_log: true
+
+- name: Find deployed certificates
+  find:
+    paths: "{{ haproxy_certs_dir }}"
+    patterns: "*.pem"
+  register: haproxy_cert_found
+
+- name: Remove certificates no longer configured
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ haproxy_cert_found.files | map(attribute='path') | reject('in', haproxy_certs | map(attribute='name') | map('regex_replace', '^(.*)$', haproxy_certs_dir ~ '/\\1.pem') | list) | list }}"
+  register: haproxy_cert_pruned
+
+- name: Set ownership on haproxy directory
+  file:
+    path: "{{ haproxy_path }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    recurse: yes
+
+- name: Deploy haproxy config
+  template:
+    src: haproxy.cfg.j2
+    dest: "{{ haproxy_config_path }}"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0640"
+    validate: "{{ haproxy_bin_path }} -c -f %s"
+  register: haproxy_config
+
+- name: Check config with the deployed binary
+  command: "{{ haproxy_bin_path }} -c -f {{ haproxy_config_path }}"
+  changed_when: false
+
+- name: Deploy systemd service file
+  template:
+    src: haproxy.service.j2
+    dest: "{{ haproxy_service_file_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: haproxy_unit
+
+- name: Start haproxy
+  block:
+    - name: Restart haproxy if anything changed
+      systemd:
+        name: haproxy
+        state: "{{ 'restarted' if haproxy_changed else 'started' }}"
+        enabled: yes
+        daemon_reload: yes
+      vars:
+        haproxy_changed: >-
+          {{ haproxy_bin.changed or haproxy_cert_files.changed or haproxy_cert_pruned.changed
+             or haproxy_config.changed or haproxy_unit.changed }}
+
+    - name: Wait for haproxy ports
+      wait_for:
+        host: "{{ item.host }}"
+        port: "{{ item.port }}"
+        timeout: 30
+      loop:
+        - { host: "{{ haproxy_bind_address or '127.0.0.1' }}", port: "{{ haproxy_http_port }}" }
+        - { host: "{{ haproxy_bind_address or '127.0.0.1' }}", port: "{{ haproxy_https_port }}" }
+        - { host: 127.0.0.1, port: "{{ haproxy_stats_port }}" }
+
+  rescue:
+    - name: Fail after failed start
+      fail:
+        msg: >
+          haproxy не поднялся на {{ inventory_hostname }}. Конфиг прошёл haproxy -c,
+          значит дело в запуске: journalctl -u haproxy -n 50
+
+- name: Read haproxy stats
+  uri:
+    url: "http://127.0.0.1:{{ haproxy_stats_port }}/stats;csv"
+    return_content: yes
+  register: haproxy_stats
+
+- name: Show backend servers
+  debug:
+    msg: "{{ haproxy_stats.content.splitlines() | reject('match', '#') | reject('search', '^[^,]*,(FRONTEND|BACKEND),') | map('regex_replace', '^([^,]*),([^,]*),(?:[^,]*,){15}([^,]*),.*$', '\\1/\\2: \\3') | list }}"

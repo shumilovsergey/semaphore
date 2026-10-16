@@ -1,0 +1,68 @@
+# Всё, что ниже без значения, задаётся в servers/<hostname>.yml. Пример
+# балансировщика перед ingress кубернетиса:
+#
+#   haproxy_certs:
+#     - name: sh-development.ru
+#       crt: sh-development.ru/fullchain.pem
+#       key: sh-development.ru/privkey.pem
+#
+#   haproxy_backends:
+#     - name: k8s_ingress
+#       port: 30080
+#       servers: [10.10.30.171, 10.10.30.172, 10.10.30.173]
+#
+#   haproxy_routes:
+#     - hosts: [grafana.sh-development.ru, gitea.sh-development.ru]
+#       backend: k8s_ingress
+#
+#   nft_allow_input_extra:
+#     - { port: [80, 443], comment: "haproxy" }
+
+# Wildcard-сертификаты. crt и key — пути относительно haproxy_store_certs_dir
+# на контроллере; crt — сертификат вместе с цепочкой (fullchain).
+# name — имя собранного PEM на хосте. Первый в списке отдаётся клиентам,
+# чьё SNI не подошло ни к одному сертификату.
+haproxy_certs: []
+
+# Группы нод. name — имя для routes, port — один на всю группу (NodePort),
+# servers — адреса. server_options дописываются к каждой строке server,
+# например "check send-proxy-v2" или "check ssl verify none".
+# options — сырые строки в секцию backend (option httpchk GET /healthz ...).
+haproxy_backends: []
+
+# Какой Host куда. Совпадение точное, порт в Host отбрасывается.
+haproxy_routes: []
+
+# Куда идёт Host, не найденный в routes. Пусто — haproxy отвечает 503.
+haproxy_default_backend: ""
+
+# http только редиректит на https. false — http маршрутизируется так же,
+# как https
+haproxy_http_redirect: true
+
+# Пусто — слушать на всех IPv4-адресах
+haproxy_bind_address: ""
+haproxy_http_port: 80
+haproxy_https_port: 443
+# Страница статистики, только на 127.0.0.1
+haproxy_stats_port: 8404
+
+haproxy_maxconn: 4096
+haproxy_timeout_connect: 5s
+haproxy_timeout_client: 60s
+haproxy_timeout_server: 60s
+# websocket и прочие долгие соединения после апгрейда
+haproxy_timeout_tunnel: 1h
+
+haproxy_path: "/opt/haproxy"
+haproxy_certs_dir: "{{ haproxy_path }}/certs"
+haproxy_bin_path: "{{ haproxy_path }}/haproxy"
+haproxy_config_path: "{{ haproxy_path }}/haproxy.cfg"
+haproxy_service_file_path: "/etc/systemd/system/haproxy.service"
+service_user: service_ansible
+
+# Бинарь и сертификаты не качаются: лежат на сервере Semaphore в хранилище
+# bin_store_dir (задаётся в Environment проекта). Подменили файл в
+# хранилище — при следующем прогоне copy увидит другую checksum.
+haproxy_store_bin: "{{ bin_store_dir }}/haproxy/haproxy"
+haproxy_store_certs_dir: "{{ bin_store_dir }}/certs"

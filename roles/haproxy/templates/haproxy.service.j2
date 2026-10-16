@@ -1,0 +1,21 @@
+[Unit]
+Description=HAProxy load balancer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ service_user }}
+Group={{ service_user }}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+LimitNOFILE=1048576
+ExecStartPre={{ haproxy_bin_path }} -c -q -f {{ haproxy_config_path }}
+ExecStart={{ haproxy_bin_path }} -W -db -f {{ haproxy_config_path }}
+ExecReload=/bin/kill -USR2 $MAINPID
+KillMode=mixed
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

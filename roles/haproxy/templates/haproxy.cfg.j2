@@ -1,0 +1,55 @@
+# {{ ansible_managed }}
+
+global
+    log stdout format raw local0
+    maxconn {{ haproxy_maxconn }}
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+
+defaults
+    mode http
+    log global
+    option httplog
+    option forwardfor
+    timeout connect {{ haproxy_timeout_connect }}
+    timeout client {{ haproxy_timeout_client }}
+    timeout server {{ haproxy_timeout_server }}
+    timeout tunnel {{ haproxy_timeout_tunnel }}
+
+frontend stats
+    bind 127.0.0.1:{{ haproxy_stats_port }}
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+{% macro routing() %}
+{% for route in haproxy_routes %}
+    use_backend {{ route.backend }} if { req.hdr(host),field(1,:),lower -m str {{ route.hosts | map('lower') | join(' ') }} }
+{% endfor %}
+{% if haproxy_default_backend %}
+    default_backend {{ haproxy_default_backend }}
+{% endif %}
+{% endmacro %}
+
+frontend http
+    bind {{ haproxy_bind_address }}:{{ haproxy_http_port }}
+    http-request set-header X-Forwarded-Proto http
+{% if haproxy_http_redirect %}
+    http-request redirect scheme https code 301
+{% else %}
+{{ routing() }}
+{%- endif %}
+
+frontend https
+    bind {{ haproxy_bind_address }}:{{ haproxy_https_port }} ssl{% for cert in haproxy_certs %} crt {{ haproxy_certs_dir }}/{{ cert.name }}.pem{% endfor %} alpn h2,http/1.1
+    http-request set-header X-Forwarded-Proto https
+{{ routing() }}
+{%- for backend in haproxy_backends %}
+
+backend {{ backend.name }}
+    balance roundrobin
+{% for option in backend.options | default([]) %}
+    {{ option }}
+{% endfor %}
+{% for server in backend.servers %}
+    server {{ backend.name }}_{{ loop.index }} {{ server }}:{{ backend.port }} {{ backend.server_options | default('check') }}
+{% endfor %}
+{% endfor %}
