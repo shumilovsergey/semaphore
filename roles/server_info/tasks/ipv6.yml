@@ -1,0 +1,320 @@
+---
+
+# Срез IPv6 перед будущей ролью ipv6_switch
+#   state     — включён ли IPv6: ядро, sysctl, интерфейсы, адреса, маршрут
+#   netcfg    — какой сетевой слой может вернуть IPv6 после sysctl
+#               (NetworkManager, netplan/networkd, ifupdown, ifcfg)
+#   consumers — кто полагается на IPv6: слушающие сокеты, конфиги сервисов
+#   platform  — Docker и Kubernetes; IPv6 на них тоже собирается
+#
+# Только чтение, ничего не меняет.
+#
+# Неочевидное
+#   sysctl disable_ipv6 не выгружает стек: сокет на [::] продолжает работать
+#     (и принимать IPv4), ломаются только привязки к ::1 и к конкретным адресам
+#   ipv6.disable=1 в cmdline ядра ломает и [::] — AF_INET6 недоступен вовсе
+#   NetworkManager сам пишет disable_ipv6 на свои интерфейсы по ipv6.method
+#   networkd/netplan поднимают IPv6 на линке, если там описан dhcp6 или адрес
+#   обратное включение sysctl не возвращает адреса без перезапуска линка
+#   в LXC /proc/sys может быть только для чтения — роль там бессильна
+#
+# Extra Variables (опционально):
+#   ipv6_probe_host — IPv6-адрес или имя для ping -6. Без него проба пропускается.
+#
+# Строки-маркеры в выводе:
+#   IPV6=<...>      — итоговое состояние на хосте
+#   GLOBAL=<...>    — глобальные адреса
+#   ROUTE6=<...>    — маршрут по умолчанию
+#   PROBE=<...>     — результат пинга ipv6_probe_host
+#   NETMGR=<...>    — активные сетевые слои
+#   LISTEN6=<...>   — счётчики сокетов: wild ([::], *), lo (::1), addr (конкретный адрес)
+#   HARDCODED=<...> — где IPv6 прописан в конфигах сервисов
+#   DOCKER=<...>    — Docker и его IPv6
+#   K8S=<...>       — Kubernetes на хосте
+#   RISK=<...>      — что сломается или помешает при выключении
+
+# --- слой 1: состояние ядра и интерфейсов ---
+
+- name: info | IPv6 - inspect kernel and interface state
+  become: true
+  shell:
+    cmd: |
+      echo "== state =="
+      echo "kernel=$(uname -r)"
+
+      # выключено на уровне загрузки
+      grep -qw 'ipv6.disable=1' /proc/cmdline && echo "cmdline=ipv6.disable=1"
+      grep -sHnE 'ipv6\.disable' /etc/default/grub /etc/default/grub.d/*.cfg /etc/kernel/cmdline | sed 's/^/boot.config: /'
+      grep -sHnE '(blacklist|install)[[:space:]]+ipv6|options[[:space:]]+ipv6' /etc/modprobe.d/*.conf | sed 's/^/modprobe: /'
+
+      if [ ! -d /proc/sys/net/ipv6 ]; then
+        echo "IPV6=absent (нет /proc/sys/net/ipv6 — ядро без IPv6 или ipv6.disable=1)"
+        exit 0
+      fi
+
+      # текущие значения sysctl
+      for k in all default lo; do
+        echo "sysctl.$k.disable_ipv6=$(cat /proc/sys/net/ipv6/conf/$k/disable_ipv6)"
+      done
+      echo "sysctl.bindv6only=$(cat /proc/sys/net/ipv6/bindv6only)"
+      if [ -w /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
+        echo "sysctl.writable=yes"
+      else
+        echo "sysctl.writable=no"
+        echo "RISK=sysctl-readonly (/proc/sys/net/ipv6 только для чтения — контейнер, sysctl отсюда не применить)"
+      fi
+
+      # где sysctl закреплён на диске
+      for f in /etc/sysctl.conf /etc/sysctl.d/*.conf /run/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf; do
+        [ -f "$f" ] || continue
+        case "$f" in /lib/*) [ -L /lib ] && continue ;; esac
+        grep -nE '^[[:space:]]*[^#;].*(disable_ipv6|bindv6only|accept_ra|autoconf)' "$f" | sed "s|^|sysctl.file: $f:|"
+      done
+
+      # интерфейсы: включён / выключен
+      on=""; off=""; virt=0
+      for d in /proc/sys/net/ipv6/conf/*; do
+        i=${d##*/}
+        case "$i" in
+          all|default) continue ;;
+          veth*|cali*|lxc*|tap*|fwpr*|fwln*|fwbr*|br-*) virt=$((virt + 1)); continue ;;
+        esac
+        if [ "$(cat "$d/disable_ipv6")" = 1 ]; then off="$off $i"; else on="$on $i"; fi
+      done
+      echo "iface.enabled=${on# }"
+      echo "iface.disabled=${off# }"
+      [ "$virt" -gt 0 ] && echo "iface.virtual=$virt (veth/cali/lxc/tap/br-* — не перечислены)"
+
+      # адреса и маршрут
+      ip -6 addr show 2>/dev/null | awk '
+        /^[0-9]+:/ { d = $2; sub(/:$/, "", d); sub(/@.*/, "", d) }
+        /inet6/ && /scope global/ { print "addr.global=" $2 " dev " d (/dynamic/ ? " (dynamic)" : " (static)") }
+        /inet6/ && /scope link/   { ll++ }
+        END { print "addr.linklocal.count=" ll + 0 }'
+      g=$(ip -6 addr show scope global 2>/dev/null | grep -c 'inet6')
+      r=$(ip -6 route show default 2>/dev/null | head -1)
+      echo "GLOBAL=$g"
+      echo "ROUTE6=${r:-нет}"
+
+      # итог
+      if [ -z "$on" ]; then
+        state="disabled (sysctl, все интерфейсы)"
+      elif [ "$on" = " lo" ]; then
+        state="disabled (sysctl, кроме lo)"
+      elif [ -z "$off" ]; then
+        if [ "$g" -gt 0 ]; then state="enabled, есть глобальные адреса"; else state="enabled, только link-local"; fi
+      else
+        state="partial (включён на:$on)"
+      fi
+      echo "IPV6=$state"
+
+      # проба наружу
+      p="{{ ipv6_probe_host | default('') }}"
+      if [ -n "$p" ]; then
+        if ping -6 -c1 -W2 "$p" >/dev/null 2>&1 || ping6 -c1 -W2 "$p" >/dev/null 2>&1; then
+          echo "PROBE=$p ok"
+        else
+          echo "PROBE=$p НЕТ ОТВЕТА"
+        fi
+      fi
+      exit 0
+    executable: /bin/sh
+  register: _ipv6_state
+  changed_when: false
+  failed_when: false
+
+# --- слой 2: кто управляет сетью и может вернуть IPv6 ---
+
+- name: info | IPv6 - inspect network configuration layers
+  become: true
+  shell:
+    cmd: |
+      echo "== netcfg =="
+      act() { systemctl is-active --quiet "$1" 2>/dev/null; }
+
+      # активные сетевые слои
+      m=""
+      act NetworkManager   && m="$m NetworkManager"
+      act systemd-networkd && m="$m systemd-networkd"
+      act networking       && m="$m ifupdown"
+      act wicked           && m="$m wicked"
+      ls /etc/netplan/*.yaml >/dev/null 2>&1 && m="$m netplan"
+      [ -f /etc/cloud/cloud.cfg ] && ! [ -f /etc/cloud/cloud-init.disabled ] && m="$m cloud-init"
+      if ! command -v systemctl >/dev/null 2>&1 && [ -f /etc/network/interfaces ]; then
+        m="$m ifupdown(no-systemd)"
+      fi
+      echo "NETMGR=${m# }"
+
+      # netplan
+      for f in /etc/netplan/*.yaml; do
+        [ -f "$f" ] || continue
+        grep -nE 'dhcp6|accept-ra|link-local|ipv6|::' "$f" | sed "s|^|netcfg.netplan: $f:|"
+      done
+      grep -sqE 'dhcp6:[[:space:]]*(true|yes)|accept-ra:[[:space:]]*(true|yes)' /etc/netplan/*.yaml \
+        && echo "RISK=netplan-ipv6 (netplan включает dhcp6/accept-ra — networkd поднимет IPv6 на линке)"
+
+      # cloud-init перегенерирует netplan
+      grep -sHnE 'network:[[:space:]]*\{?[[:space:]]*config:[[:space:]]*disabled' /etc/cloud/cloud.cfg /etc/cloud/cloud.cfg.d/*.cfg \
+        | sed 's/^/netcfg.cloud-init: /'
+
+      # systemd-networkd
+      grep -sHnE '^[[:space:]]*(IPv6[A-Za-z]*|DHCP|LinkLocalAddressing|Address=[^#]*:)' \
+        /etc/systemd/network/*.network /run/systemd/network/*.network | sed 's/^/netcfg.networkd: /'
+
+      # NetworkManager
+      if command -v nmcli >/dev/null 2>&1 && act NetworkManager; then
+        nmcli -t -f NAME con show --active 2>/dev/null | while IFS= read -r c; do
+          [ "$c" = lo ] && continue
+          v=$(nmcli -g ipv6.method con show "$c" 2>/dev/null)
+          echo "netcfg.nm[$c]=ipv6.method:${v:-?}"
+          case "$v" in
+            disabled|ignore) ;;
+            *) echo "RISK=networkmanager-ipv6 ([$c] ipv6.method=$v — NM вернёт IPv6 поверх sysctl)" ;;
+          esac
+        done
+      fi
+
+      # ifupdown
+      grep -sHnE 'inet6|ipv6|accept_ra|autoconf' /etc/network/interfaces /etc/network/interfaces.d/* \
+        | sed 's/^/netcfg.ifupdown: /'
+
+      # RHEL ifcfg
+      grep -sHnE '^(IPV6|NETWORKING_IPV6)' /etc/sysconfig/network /etc/sysconfig/network-scripts/ifcfg-* \
+        | sed 's/^/netcfg.ifcfg: /'
+      exit 0
+    executable: /bin/sh
+  register: _ipv6_netcfg
+  changed_when: false
+  failed_when: false
+
+# --- слой 3: кто полагается на IPv6 ---
+
+- name: info | IPv6 - inspect IPv6 consumers
+  become: true
+  shell:
+    cmd: |
+      echo "== consumers =="
+
+      # слушающие сокеты
+      if command -v ss >/dev/null 2>&1; then
+        l6=$(ss -lntup 2>/dev/null | awk 'NR > 1 {
+          l = $5; h = l
+          sub(/:[^:]*$/, "", h); gsub(/[][]/, "", h); sub(/%.*/, "", h)
+          if (h == "*" || h == "::") c = "wild"
+          else if (h == "::1")       c = "lo"
+          else if (h ~ /:/)          c = "addr"
+          else next
+          p = "-"; if (match($7, /"[^"]+"/)) p = substr($7, RSTART + 1, RLENGTH - 2)
+          print "listen6." c "=" $1 " " l " " p
+        }' | sort -u)
+      else
+        l6=$(netstat -lntup 2>/dev/null | awk '$1 ~ /6$/ { print "listen6.raw=" $0 }')
+      fi
+      [ -n "$l6" ] && echo "$l6"
+      w=$(printf '%s\n' "$l6" | grep -c '^listen6\.wild=')
+      lo=$(printf '%s\n' "$l6" | grep -c '^listen6\.lo=')
+      a=$(printf '%s\n' "$l6" | grep -c '^listen6\.addr=')
+      echo "LISTEN6=wild:$w lo:$lo addr:$a"
+      [ "$lo" -gt 0 ] && echo "RISK=listen-loopback6 ($lo сокетов на ::1 — не стартуют, если выключить IPv6 и на lo)"
+      [ "$a" -gt 0 ]  && echo "RISK=listen-addr6 ($a сокетов на конкретных IPv6-адресах — не стартуют после выключения)"
+
+      # localhost в /etc/hosts
+      grep -qE '^[[:space:]]*::1[[:space:]].*localhost' /etc/hosts && echo "hosts.localhost6=::1 localhost есть в /etc/hosts"
+
+      # IPv6 в конфигах сервисов
+      hc=""
+      x=$(grep -sHnE '^[[:space:]]*(ListenAddress|AddressFamily)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf)
+      [ -n "$x" ] && { echo "$x" | sed 's/^/conf.sshd: /'; echo "$x" | grep -qE ':.*:|inet6' && hc="$hc sshd"; }
+      x=$(grep -rsHnE '^[[:space:]]*listen[[:space:]]+\[' /etc/nginx)
+      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.nginx: /'; hc="$hc nginx($(echo "$x" | wc -l))"; }
+      x=$(grep -rsHnE '^[[:space:]]*bind[[:space:]]+(\[|::|ipv6@)' /etc/haproxy)
+      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.haproxy: /'; hc="$hc haproxy($(echo "$x" | wc -l))"; }
+      x=$(grep -rsHnE '^[[:space:]]*Listen[[:space:]]+\[' /etc/apache2 /etc/httpd)
+      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.apache: /'; hc="$hc apache($(echo "$x" | wc -l))"; }
+      if command -v postconf >/dev/null 2>&1; then
+        x=$(postconf -h inet_protocols 2>/dev/null)
+        echo "conf.postfix: inet_protocols=$x"
+        [ "$x" = ipv4 ] || hc="$hc postfix($x)"
+      fi
+      [ -z "$hc" ] && hc=" нет"
+      echo "HARDCODED=${hc# }"
+      exit 0
+    executable: /bin/sh
+  register: _ipv6_consumers
+  changed_when: false
+  failed_when: false
+
+# --- слой 4: Docker и Kubernetes ---
+
+- name: info | IPv6 - inspect container platforms
+  become: true
+  shell:
+    cmd: |
+      echo "== platform =="
+      act() { systemctl is-active --quiet "$1" 2>/dev/null; }
+
+      # Docker
+      if command -v docker >/dev/null 2>&1; then
+        grep -snE 'ipv6|ip6tables|fixed-cidr-v6' /etc/docker/daemon.json | sed 's/^/docker.daemon.json: /'
+        grep -sqE '"ipv6"[[:space:]]*:[[:space:]]*true' /etc/docker/daemon.json \
+          && echo "RISK=docker-ipv6-daemon (в daemon.json \"ipv6\": true)"
+        if act docker; then
+          n=$(docker ps -q 2>/dev/null | wc -l)
+          nets=$(docker network ls -q 2>/dev/null | xargs -r docker network inspect -f '{% raw %}{{.Name}} ipv6={{.EnableIPv6}}{% endraw %}' 2>/dev/null)
+          echo "$nets" | sed '/^$/d; s/^/docker.network: /'
+          v6=$(printf '%s\n' "$nets" | grep -c 'ipv6=true')
+          echo "DOCKER=active, контейнеров запущено: $n, сетей с IPv6: $v6"
+          [ "$v6" -gt 0 ] && echo "RISK=docker-ipv6-networks ($v6 сетей Docker с EnableIPv6)"
+        else
+          echo "DOCKER=установлен, служба не активна"
+        fi
+      else
+        echo "DOCKER=нет"
+      fi
+      command -v podman >/dev/null 2>&1 && echo "podman=установлен"
+
+      # Kubernetes
+      k=""
+      for u in kubelet k3s k3s-agent rke2-server rke2-agent snap.microk8s.daemon-kubelite; do
+        act "$u" && k="$k $u"
+      done
+      [ -f /etc/kubernetes/kubelet.conf ] && k="$k kubeadm"
+      if [ -n "$k" ]; then
+        echo "K8S=yes:$k"
+        echo "RISK=k8s (на узле Kubernetes IPv6 и netfilter принадлежат CNI)"
+        grep -sHnE 'cidr|node-ip|ipv6|dual' \
+          /etc/kubernetes/manifests/kube-controller-manager.yaml \
+          /etc/kubernetes/manifests/kube-apiserver.yaml \
+          /var/lib/kubelet/config.yaml /var/lib/kubelet/kubeadm-flags.env \
+          /etc/rancher/k3s/config.yaml /etc/rancher/rke2/config.yaml \
+          /var/snap/microk8s/current/args/kube-proxy \
+          | head -30 | sed 's/^/k8s.config: /'
+        grep -sHnE 'ipv6|::|"cidr"|subnet' /etc/cni/net.d/* | head -30 | sed 's/^/k8s.cni: /'
+      else
+        echo "K8S=нет"
+      fi
+      exit 0
+    executable: /bin/sh
+  register: _ipv6_platform
+  changed_when: false
+  failed_when: false
+
+- name: info | collect IPv6
+  set_fact:
+    info_ipv6: >-
+      {{ ((_ipv6_state.stdout_lines        | default([]))
+         + (_ipv6_netcfg.stdout_lines    | default([]))
+         + (_ipv6_consumers.stdout_lines | default([]))
+         + (_ipv6_platform.stdout_lines  | default([])))
+         | map('trim') | reject('equalto', '') | list }}
+
+- name: info | output IPv6 summary
+  debug:
+    msg: >-
+      {{ [inventory_hostname + ': ' + ansible_distribution + ' ' + ansible_distribution_version
+          + ', virt=' + (ansible_virtualization_type | default('?')) + '/' + (ansible_virtualization_role | default('?'))]
+         + (info_ipv6 | select('match', '^(IPV6|GLOBAL|ROUTE6|PROBE|NETMGR|LISTEN6|HARDCODED|DOCKER|K8S|RISK)=') | list) }}
+
+- name: info | output IPv6 details
+  debug:
+    msg: "{{ info_ipv6 }}"
