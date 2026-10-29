@@ -17,13 +17,37 @@
       esac
 
       # правила в ядре
-      if iptables -w -S ufw-user-input >/dev/null 2>&1; then
-        echo active
-      else
+      if ! iptables -w -S ufw-user-input >/dev/null 2>&1; then
         echo "active в ufw status, но правил ufw в ядре нет"
+        exit 0
+      fi
+
+      # пользовательские правила
+      n=$(ufw show added 2>/dev/null | grep -c '^ufw ')
+      if [ "$n" -eq 0 ]; then
+        d=$(ufw status verbose 2>/dev/null | sed -n 's/^Default: //p')
+        echo "active, но правил нет — работает только политика по умолчанию: ${d:-?}"
+      else
+        echo active
       fi
     executable: /bin/sh
   register: _ufw_active
+  changed_when: false
+  failed_when: false
+  when: _ufw_bin.rc == 0
+
+- name: info | firewall - read ufw rules
+  become: true
+  shell:
+    cmd: |
+      echo "--- ufw status verbose"
+      ufw status verbose 2>&1
+      if ufw status 2>/dev/null | grep -q '^Status: inactive'; then
+        echo "--- ufw show added"
+        ufw show added 2>&1
+      fi
+    executable: /bin/sh
+  register: _ufw_rules
   changed_when: false
   failed_when: false
   when: _ufw_bin.rc == 0
@@ -37,6 +61,24 @@
 - name: info | firewall - check nftables active
   command: systemctl is-active nftables
   register: _nft_active
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - check ansible nft role trace
+  shell: "grep -qs 'Managed by Ansible (role: nft)' /etc/nftables.d/*.nft"
+  register: _nft_role
+  changed_when: false
+  failed_when: false
+
+- name: info | firewall - read nftables configs
+  shell:
+    cmd: |
+      for f in /etc/nftables.conf /etc/nftables.d/*.nft; do
+        [ -f "$f" ] || continue
+        echo "--- $f"
+        cat "$f"
+      done
+  register: _nft_conf
   changed_when: false
   failed_when: false
 
@@ -56,8 +98,21 @@
   set_fact:
     info_firewall:
       ufw: "{{ 'not installed' if _ufw_bin.rc != 0 else (_ufw_active.stdout | default('', true) | trim | default('unknown', true)) }}"
-      nftables: "{{ 'not installed' if _nft_bin.rc != 0 else ('active' if _nft_active.rc == 0 else 'inactive') }}"
-      iptables: "{{ 'not installed' if _ipt_bin.rc != 0 else ('active' if _ipt_active.rc == 0 else 'inactive') }}"
+      nftables: >-
+        {{ 'not installed' if _nft_bin.rc != 0
+           else 'service active' if _nft_active.rc == 0
+           else 'service inactive (найден след ansible nft role)' if _nft_role.rc == 0
+           else 'service inactive (следов ansible nft role нет)' }}
+      iptables: "{{ 'not installed' if _ipt_bin.rc != 0 else ('service active' if _ipt_active.rc == 0 else 'service inactive') }}"
+
+- name: info | output nftables configs
+  debug:
+    msg: "{{ _nft_conf.stdout_lines | default([]) | default(['конфигов nftables нет'], true) }}"
+
+- name: info | output ufw rules
+  debug:
+    msg: "{{ _ufw_rules.stdout_lines | default([]) }}"
+  when: _ufw_bin.rc == 0
 
 - name: info | output firewall
   debug:
