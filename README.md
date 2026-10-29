@@ -55,10 +55,10 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 
 - [Телефон под бэкапы (Termux)](./playbooks/android/README.md)
 
-- [Ротация ssh-ключа Ansible](./playbooks/identity/README.md)
-
 - [Подключение TOTP](./tools/totp.md)
 
 - [Публичный репозиторий ролей](./tools/sync_shumilov_roles.md)
+
+- [Шорткаты для manual.sh скриптов](./tools/manual_bash_shortcuts.md)
 
 

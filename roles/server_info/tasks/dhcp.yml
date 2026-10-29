@@ -163,4 +163,4 @@
       dns={{ info_dhcp_dns | trim }} |
       domain={{ info_dhcp_domain | trim }} |
       renew={{ info_dhcp_renew | trim }}
-      {%- if info_dhcp_resolv | trim | length > 0 %} | resolv.conf={{ info_dhcp_resolv | trim }}{% endif %}{% endif %}
+      {%- if info_dhcp_resolv | default('', true) | trim | length > 0 %} | resolv.conf={{ info_dhcp_resolv | trim }}{% endif %}{% endif %}
