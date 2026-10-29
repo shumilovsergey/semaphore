@@ -27,8 +27,10 @@
 #   ROUTE6=<...>    — маршрут по умолчанию
 #   PROBE=<...>     — результат пинга ipv6_probe_host
 #   NETMGR=<...>    — активные сетевые слои
-#   LISTEN6=<...>   — счётчики сокетов: wild ([::], *), lo (::1), addr (конкретный адрес)
-#   HARDCODED=<...> — где IPv6 прописан в конфигах сервисов
+#   LISTEN6=<...>   — счётчики сокетов: wild ([::], *), lo (::1), addr (конкретный адрес),
+#                     mapped (::ffff:a.b.c.d — это IPv4 на двухстековом сокете, не риск)
+#   HARDCODED=<...> — привязки к конкретным IPv6 в конфигах сервисов; [::] не считается,
+#                     у nginx читается действующий конфиг (nginx -T), а не все файлы /etc/nginx
 #   DOCKER=<...>    — Docker и его IPv6
 #   K8S=<...>       — Kubernetes на хосте
 #   RISK=<...>      — что сломается или помешает при выключении
@@ -65,9 +67,12 @@
       fi
 
       # где sysctl закреплён на диске
+      seen=" "
       for f in /etc/sysctl.conf /etc/sysctl.d/*.conf /run/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf; do
         [ -f "$f" ] || continue
-        case "$f" in /lib/*) [ -L /lib ] && continue ;; esac
+        rp=$(readlink -f "$f")
+        case "$seen" in *" $rp "*) continue ;; esac
+        seen="$seen$rp "
         grep -nE '^[[:space:]]*[^#;].*(disable_ipv6|bindv6only|accept_ra|autoconf)' "$f" | sed "s|^|sysctl.file: $f:|"
       done
 
@@ -136,13 +141,16 @@
       m=""
       act NetworkManager   && m="$m NetworkManager"
       act systemd-networkd && m="$m systemd-networkd"
-      act networking       && m="$m ifupdown"
+      if act networking; then
+        m="$m ifupdown"
+      elif grep -sE '^[[:space:]]*iface[[:space:]]' /etc/network/interfaces /etc/network/interfaces.d/* \
+           | grep -qvE 'iface[[:space:]]+lo[[:space:]]'; then
+        s=$(systemctl is-active networking 2>/dev/null)
+        m="$m ifupdown(networking:${s:-no-systemd})"
+      fi
       act wicked           && m="$m wicked"
       ls /etc/netplan/*.yaml >/dev/null 2>&1 && m="$m netplan"
       [ -f /etc/cloud/cloud.cfg ] && ! [ -f /etc/cloud/cloud-init.disabled ] && m="$m cloud-init"
-      if ! command -v systemctl >/dev/null 2>&1 && [ -f /etc/network/interfaces ]; then
-        m="$m ifupdown(no-systemd)"
-      fi
       echo "NETMGR=${m# }"
 
       # netplan
@@ -160,6 +168,14 @@
       # systemd-networkd
       grep -sHnE '^[[:space:]]*(IPv6[A-Za-z]*|DHCP|LinkLocalAddressing|Address=[^#]*:)' \
         /etc/systemd/network/*.network /run/systemd/network/*.network | sed 's/^/netcfg.networkd: /'
+      if act systemd-networkd; then
+        ml=$(networkctl list --no-legend 2>/dev/null | awk '$5 == "configured" { printf "%s ", $2 }')
+        echo "netcfg.networkd.managed=${ml:-нет}"
+        if [ -n "$ml" ] && ! grep -sqE '^[[:space:]]*LinkLocalAddressing=(no|ipv4|false)' \
+             /etc/systemd/network/*.network /run/systemd/network/*.network; then
+          echo "RISK=networkd-linklocal (networkd управляет: ${ml% } — без LinkLocalAddressing=no|ipv4 может вернуть disable_ipv6=0 при перенастройке линка; в netplan: link-local: [ ipv4 ])"
+        fi
+      fi
 
       # NetworkManager
       if command -v nmcli >/dev/null 2>&1 && act NetworkManager; then
@@ -202,6 +218,7 @@
           sub(/:[^:]*$/, "", h); gsub(/[][]/, "", h); sub(/%.*/, "", h)
           if (h == "*" || h == "::") c = "wild"
           else if (h == "::1")       c = "lo"
+          else if (h ~ /^::ffff:/)   c = "mapped"
           else if (h ~ /:/)          c = "addr"
           else next
           p = "-"; if (match($7, /"[^"]+"/)) p = substr($7, RSTART + 1, RLENGTH - 2)
@@ -214,7 +231,8 @@
       w=$(printf '%s\n' "$l6" | grep -c '^listen6\.wild=')
       lo=$(printf '%s\n' "$l6" | grep -c '^listen6\.lo=')
       a=$(printf '%s\n' "$l6" | grep -c '^listen6\.addr=')
-      echo "LISTEN6=wild:$w lo:$lo addr:$a"
+      mp=$(printf '%s\n' "$l6" | grep -c '^listen6\.mapped=')
+      echo "LISTEN6=wild:$w lo:$lo addr:$a mapped:$mp"
       [ "$lo" -gt 0 ] && echo "RISK=listen-loopback6 ($lo сокетов на ::1 — не стартуют, если выключить IPv6 и на lo)"
       [ "$a" -gt 0 ]  && echo "RISK=listen-addr6 ($a сокетов на конкретных IPv6-адресах — не стартуют после выключения)"
 
@@ -223,18 +241,28 @@
 
       # IPv6 в конфигах сервисов
       hc=""
+      hard() { grep -vE '\[::\]|[[:space:]]:::[0-9]' | grep -c . ; }
       x=$(grep -sHnE '^[[:space:]]*(ListenAddress|AddressFamily)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf)
-      [ -n "$x" ] && { echo "$x" | sed 's/^/conf.sshd: /'; echo "$x" | grep -qE ':.*:|inet6' && hc="$hc sshd"; }
-      x=$(grep -rsHnE '^[[:space:]]*listen[[:space:]]+\[' /etc/nginx)
-      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.nginx: /'; hc="$hc nginx($(echo "$x" | wc -l))"; }
+      [ -n "$x" ] && { echo "$x" | sed 's/^/conf.sshd: /'; echo "$x" | cut -d: -f3- | grep -qE ':.*:|inet6' && hc="$hc sshd"; }
+      if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
+        x=$(nginx -T 2>/dev/null | awk '/^# configuration file / { f = $4; sub(/:$/, "", f) }
+          /^[[:space:]]*listen[[:space:]]+\[/ { sub(/^[[:space:]]+/, ""); print f ": " $0 }')
+      else
+        x=$(grep -sHnE '^[[:space:]]*listen[[:space:]]+\[' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf /etc/nginx/sites-enabled/*)
+      fi
+      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.nginx: /'; n=$(echo "$x" | hard); [ "$n" -gt 0 ] && hc="$hc nginx($n)"; }
       x=$(grep -rsHnE '^[[:space:]]*bind[[:space:]]+(\[|::|ipv6@)' /etc/haproxy)
-      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.haproxy: /'; hc="$hc haproxy($(echo "$x" | wc -l))"; }
+      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.haproxy: /'; n=$(echo "$x" | hard); [ "$n" -gt 0 ] && hc="$hc haproxy($n)"; }
       x=$(grep -rsHnE '^[[:space:]]*Listen[[:space:]]+\[' /etc/apache2 /etc/httpd)
-      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.apache: /'; hc="$hc apache($(echo "$x" | wc -l))"; }
+      [ -n "$x" ] && { echo "$x" | head -20 | sed 's/^/conf.apache: /'; n=$(echo "$x" | hard); [ "$n" -gt 0 ] && hc="$hc apache($n)"; }
       if command -v postconf >/dev/null 2>&1; then
         x=$(postconf -h inet_protocols 2>/dev/null)
-        echo "conf.postfix: inet_protocols=$x"
-        [ "$x" = ipv4 ] || hc="$hc postfix($x)"
+        if [ -z "$x" ]; then
+          echo "conf.postfix: postconf ничего не вернул — postfix не настроен"
+        else
+          echo "conf.postfix: inet_protocols=$x"
+          [ "$x" = ipv4 ] || hc="$hc postfix($x)"
+        fi
       fi
       [ -z "$hc" ] && hc=" нет"
       echo "HARDCODED=${hc# }"
