@@ -5,10 +5,28 @@
   failed_when: false
 
 - name: info | firewall - check ufw active
-  command: systemctl is-active ufw
+  become: true
+  shell:
+    cmd: |
+      # флаг ufw
+      st=$(ufw status 2>&1 | sed -n 's/^Status: //p')
+      case "$st" in
+        active) ;;
+        inactive) echo inactive; exit 0 ;;
+        *) echo "unknown (ufw status не ответил — нужен root)"; exit 0 ;;
+      esac
+
+      # правила в ядре
+      if iptables -w -S ufw-user-input >/dev/null 2>&1; then
+        echo active
+      else
+        echo "active в ufw status, но правил ufw в ядре нет"
+      fi
+    executable: /bin/sh
   register: _ufw_active
   changed_when: false
   failed_when: false
+  when: _ufw_bin.rc == 0
 
 - name: info | firewall - check nftables
   shell: PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin" command -v nft
@@ -37,7 +55,7 @@
 - name: info | collect firewall
   set_fact:
     info_firewall:
-      ufw: "{{ 'not installed' if _ufw_bin.rc != 0 else ('active' if _ufw_active.rc == 0 else 'inactive') }}"
+      ufw: "{{ 'not installed' if _ufw_bin.rc != 0 else (_ufw_active.stdout | default('', true) | trim | default('unknown', true)) }}"
       nftables: "{{ 'not installed' if _nft_bin.rc != 0 else ('active' if _nft_active.rc == 0 else 'inactive') }}"
       iptables: "{{ 'not installed' if _ipt_bin.rc != 0 else ('active' if _ipt_active.rc == 0 else 'inactive') }}"
 
