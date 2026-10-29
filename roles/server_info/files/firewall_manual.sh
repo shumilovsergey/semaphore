@@ -16,7 +16,7 @@ nft_state() {
   s=$(fw nft nftables)
   if [ "$s" = "service inactive" ]; then
     if grep -qs 'Managed by Ansible (role: nft)' /etc/nftables.d/*.nft; then
-      s="$s (найден след ansible nft role)"
+      s="$s (найден ansible nft конфиг — он уже работает, служба включится после перезагрузки сервера)"
     else
       s="$s (следов ansible nft role нет)"
     fi
@@ -61,13 +61,9 @@ done
 echo
 
 # правила ufw
-if command -v ufw >/dev/null 2>&1; then
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
   echo "--- ufw status verbose"
   ufw status verbose 2>&1
-  if ufw status 2>/dev/null | grep -q '^Status: inactive'; then
-    echo "--- ufw show added"
-    ufw show added 2>&1
-  fi
   echo
 fi
 

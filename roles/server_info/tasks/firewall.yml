@@ -40,12 +40,9 @@
   become: true
   shell:
     cmd: |
+      ufw status 2>/dev/null | grep -q '^Status: active' || exit 0
       echo "--- ufw status verbose"
       ufw status verbose 2>&1
-      if ufw status 2>/dev/null | grep -q '^Status: inactive'; then
-        echo "--- ufw show added"
-        ufw show added 2>&1
-      fi
     executable: /bin/sh
   register: _ufw_rules
   changed_when: false
@@ -101,7 +98,7 @@
       nftables: >-
         {{ 'not installed' if _nft_bin.rc != 0
            else 'service active' if _nft_active.rc == 0
-           else 'service inactive (найден след ansible nft role)' if _nft_role.rc == 0
+           else 'service inactive (найден ansible nft конфиг — он уже работает, служба включится после перезагрузки сервера)' if _nft_role.rc == 0
            else 'service inactive (следов ansible nft role нет)' }}
       iptables: "{{ 'not installed' if _ipt_bin.rc != 0 else ('service active' if _ipt_active.rc == 0 else 'service inactive') }}"
 
@@ -111,8 +108,8 @@
 
 - name: info | output ufw rules
   debug:
-    msg: "{{ _ufw_rules.stdout_lines | default([]) }}"
-  when: _ufw_bin.rc == 0
+    msg: "{{ _ufw_rules.stdout_lines }}"
+  when: _ufw_rules.stdout_lines | default([]) | length > 0
 
 - name: info | output firewall
   debug:
