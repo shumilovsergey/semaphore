@@ -1,0 +1,9 @@
+---
+- name: Deploy IPv6 sysctl configuration
+  ansible.builtin.template:
+    src: disable-ipv6.conf.j2
+    dest: "{{ ipv6_sysctl_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply IPv6 sysctl configuration

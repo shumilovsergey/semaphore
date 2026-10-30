@@ -1,0 +1,11 @@
+# Managed by Ansible (role: ipv6). Do not edit — changes will be overwritten.
+
+net.ipv6.conf.all.disable_ipv6 = {{ 0 if ipv6_enabled | bool else 1 }}
+net.ipv6.conf.default.disable_ipv6 = {{ 0 if ipv6_enabled | bool else 1 }}
+net.ipv6.conf.lo.disable_ipv6 = {{ 0 if ipv6_enabled | bool else 1 }}
+
+# Rollback (manual):
+# sudo rm /etc/sysctl.d/99-disable-ipv6.conf
+# sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+# sudo sysctl -w net.ipv6.conf.default.disable_ipv6=0
+# sudo sysctl -w net.ipv6.conf.lo.disable_ipv6=0

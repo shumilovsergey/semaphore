@@ -1,0 +1,5 @@
+---
+- name: Apply IPv6 sysctl configuration
+  ansible.builtin.command:
+    cmd: "sysctl -p {{ ipv6_sysctl_file }}"
+  changed_when: true

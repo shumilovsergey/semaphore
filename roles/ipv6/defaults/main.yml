@@ -1,0 +1,3 @@
+---
+ipv6_enabled: false
+ipv6_sysctl_file: /etc/sysctl.d/99-disable-ipv6.conf
