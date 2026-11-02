@@ -1,0 +1,10 @@
+services:
+  cli:
+    build: .
+    stdin_open: true
+    tty: true
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"

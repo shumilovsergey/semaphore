@@ -9,24 +9,23 @@ ansible.cfg             — конфигурация
 run.yml                 — главный плейбук: разворачивает servers/<hostname>.yml по target
 
 playbooks/              — уникальные задачи под конкретные ситуации
-  android/              — телефон под бэкапы, цель Termux напрямую
-  identity/             — ротация ssh-ключа Ansible по всему парку
-  web_apps/
 
 roles/                  — переиспользуемые рецепты (не знают про конкретные серверы)
-  0_role_template/      — шаблон для новой роли (скопируй и переименуй)
+  0_role_template/      — шаблон для новой роли
     defaults/           — переменные по умолчанию
     tasks/              — шаги выполнения
     handlers/           — запускаются после tasks при изменениях
     files/              — статические файлы
     templates/          — jinja2 шаблоны (.j2)
 
-servers/                      — конфигурация серверов
-  0_server_template.yml       — шаблон для нового сервера (скопируй и переименуй)
-  1_default.yml               — общие роли, target задаётся вручную через Extra Variables
-  <hostname>.yml              — роли и переменные конкретного сервера
+servers/                — конфигурация серверов
+  <hostname>.yml        — роли и переменные конкретного сервера
 
-tools/                  — не-ansible: скрипты инициализации, гайды
+inventory-cli/          - вспомогательная CLI (описание ниже)
+
+inventory/host.ini      - парк машин
+
+tools/                  — все что не ansible
 ```
 
 ## Установка и запуск Semaphore. GUI для управления Ansible инфраструктурой.
@@ -47,18 +46,16 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 
 - [Установка Semaphore](./tools/install.md)
 
-- [Правила репозитория](./tools/RULES.md)
-
 - [Подробнее про роли](./roles/README.md)
 
 - [Подробнее про сервера](./servers/README.md)
-
-- [Телефон под бэкапы (Termux)](./playbooks/android/README.md)
 
 - [Подключение TOTP](./tools/totp.md)
 
 - [Публичный репозиторий ролей](./tools/sync_shumilov_roles.md)
 
 - [Шорткаты для manual.sh скриптов](./tools/manual_bash_shortcuts.md)
+
+- [inventory-cli](./inventory-cli/README.md)
 
 
