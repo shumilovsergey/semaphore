@@ -29,3 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads/main/roles/server_info/files/firewall_manual.sh -o /tmp/firewall_manual.sh && sudo sh /tmp/firewall_manual.sh
 ```
+
+- OS + версия пакетов ядра
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shumilovsergey/semaphore/refs/heads/main/roles/server_info/files/os_manual.sh -o /tmp/os_manual.sh && sudo sh /tmp/os_manual.sh
+```
