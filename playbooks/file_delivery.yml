@@ -1,0 +1,128 @@
+---
+# Extra Variables в Semaphore:
+#   target: "ru-vps-main,la-vps"  # хост, группа, список через запятую или all
+#   source_dir: "/etc/letsencrypt/certs"  # абсолютный путь на сервере Ansible
+#
+# Файлы копируются в домашний каталог пользователя SSH на каждом целевом сервере.
+
+- name: Deliver a directory to servers
+  hosts: "{{ target }}"
+  gather_facts: false
+  become: false
+  vars:
+    delivery_source: "{{ source_dir | default('') | regex_replace('/+$', '') }}"
+    delivery_name: "{{ delivery_source | basename }}"
+
+  tasks:
+    - name: Validate source directory path
+      ansible.builtin.assert:
+        that:
+          - source_dir is defined
+          - source_dir is string
+          - delivery_source is match('^/')
+          - delivery_name not in ['', '.', '..']
+        fail_msg: "source_dir должен быть абсолютным путём к каталогу с именем."
+
+    - name: Check source directory on the Ansible server
+      ansible.builtin.stat:
+        path: "{{ delivery_source }}"
+        follow: true
+      delegate_to: localhost
+      become: true
+      register: delivery_source_stat
+      no_log: true
+
+    - name: Require an existing source directory
+      ansible.builtin.assert:
+        that:
+          - delivery_source_stat.stat.isdir | default(false)
+        fail_msg: "Исходный каталог не существует или недоступен на сервере Ansible."
+
+    - name: Find the remote user's home directory
+      ansible.builtin.shell: 'printf "%s" "$HOME"'
+      changed_when: false
+      register: delivery_home
+
+    - name: Require an absolute home directory
+      ansible.builtin.assert:
+        that:
+          - delivery_home.stdout is match('^/')
+        fail_msg: "Не удалось определить домашний каталог пользователя подключения."
+
+    - name: Prepare, deliver and clean up the directory
+      block:
+        - name: Create a private temporary directory on the Ansible server
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: ansible-file-delivery-
+          delegate_to: localhost
+          register: delivery_temp
+          no_log: true
+
+        # за пределами исходного каталога. Оригиналы не изменяются.
+        - name: Copy source into the temporary directory as root
+          ansible.builtin.command:
+            argv:
+              - cp
+              - -aL
+              - --
+              - "{{ delivery_source }}"
+              - "{{ delivery_temp.path }}/data"
+          delegate_to: localhost
+          become: true
+          no_log: true
+
+        - name: Give the Ansible process access to the temporary copy
+          ansible.builtin.command:
+            argv:
+              - chown
+              - -R
+              - "{{ lookup('pipe', 'id -u') }}:{{ lookup('pipe', 'id -g') }}"
+              - "{{ delivery_temp.path }}/data"
+          delegate_to: localhost
+          become: true
+          no_log: true
+
+        - name: Make the temporary copy readable by its owner
+          ansible.builtin.command:
+            argv:
+              - chmod
+              - -R
+              - u+rwX
+              - "{{ delivery_temp.path }}/data"
+          delegate_to: localhost
+          no_log: true
+
+        - name: Inspect the destination
+          ansible.builtin.stat:
+            path: "{{ delivery_home.stdout }}/{{ delivery_name }}"
+            follow: false
+          register: delivery_destination
+          no_log: true
+
+        - name: Remove a conflicting file or symbolic link
+          ansible.builtin.file:
+            path: "{{ delivery_home.stdout }}/{{ delivery_name }}"
+            state: absent
+          when:
+            - delivery_destination.stat.exists | default(false)
+            - not (delivery_destination.stat.isdir | default(false))
+          no_log: true
+
+        - name: Copy the directory into the remote home
+          ansible.builtin.copy:
+            src: "{{ delivery_temp.path }}/data/"
+            dest: "{{ delivery_home.stdout }}/{{ delivery_name }}/"
+            mode: preserve
+            force: true
+          no_log: true
+
+      always:
+        - name: Remove the temporary directory from the Ansible server
+          ansible.builtin.file:
+            path: "{{ delivery_temp.path }}"
+            state: absent
+          delegate_to: localhost
+          become: true
+          when: delivery_temp.path is defined
+          no_log: true
